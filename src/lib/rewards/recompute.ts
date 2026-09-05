@@ -265,6 +265,75 @@ export async function capsForInstrument(
   return capStatusFor(built.inst, built.rules, built.ledger, dateISO);
 }
 
+// Build cap status for every card in three database reads. The dashboard used
+// to replay each card separately, multiplying Supabase round trips by the
+// number of cards and regularly exceeding Vercel's client timeout.
+export async function capsForInstruments(
+  instrumentRows: Instrument[],
+  dateISO: string,
+  authenticatedUserId: string,
+): Promise<Map<string, CapStatus[]>> {
+  const result = new Map<string, CapStatus[]>();
+  if (!instrumentRows.length) return result;
+
+  const ids = instrumentRows.map((instrument) => instrument.id);
+  const { start, end } = yearBounds(Number(dateISO.slice(0, 4)));
+  const [ruleRows, expenseRows] = await Promise.all([
+    db
+      .select()
+      .from(rewardRules)
+      .where(inArray(rewardRules.instrumentId, ids)),
+    db
+      .select()
+      .from(expenses)
+      .where(
+        and(
+          eq(expenses.userId, authenticatedUserId),
+          inArray(expenses.instrumentId, ids),
+          gte(expenses.occurredAt, start),
+          lte(expenses.occurredAt, end),
+        ),
+      )
+      .orderBy(asc(expenses.occurredAt), asc(expenses.createdAt), asc(expenses.id)),
+  ]);
+  const refunded = await refundMap(
+    expenseRows.map((expense) => expense.id),
+    authenticatedUserId,
+  );
+
+  const rulesByInstrument = new Map<string, EngineRule[]>();
+  for (const row of ruleRows) {
+    const rules = rulesByInstrument.get(row.instrumentId) ?? [];
+    rules.push(toEngineRule(row));
+    rulesByInstrument.set(row.instrumentId, rules);
+  }
+
+  const expensesByInstrument = new Map<string, Expense[]>();
+  for (const row of expenseRows) {
+    if (!row.instrumentId) continue;
+    const rows = expensesByInstrument.get(row.instrumentId) ?? [];
+    rows.push(row);
+    expensesByInstrument.set(row.instrumentId, rows);
+  }
+
+  for (const row of instrumentRows) {
+    const instrument = toEngineInstrument(row);
+    const rules = rulesByInstrument.get(row.id) ?? [];
+    const ledger = newCapLedger();
+    for (const expense of expensesByInstrument.get(row.id) ?? []) {
+      evaluateExpense(
+        instrument,
+        rules,
+        toEngineExpense(expense, refunded.get(expense.id) ?? 0),
+        ledger,
+      );
+    }
+    result.set(row.id, capStatusFor(instrument, rules, ledger, dateISO));
+  }
+
+  return result;
+}
+
 /**
  * What would this spend earn right now? Runs the engine against a live ledger
  * without persisting, so the expense form can preview before you save.

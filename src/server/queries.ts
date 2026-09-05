@@ -29,7 +29,7 @@ import type {
 } from "@/db/schema";
 import { computeExpenseMath, sumMath, type ExpenseMath } from "@/lib/derive";
 import { monthBounds } from "@/lib/rewards/periods";
-import { capsForInstrument } from "@/lib/rewards/recompute";
+import { capsForInstruments } from "@/lib/rewards/recompute";
 import type { CapStatus } from "@/lib/rewards/engine";
 import { requireUserId } from "@/lib/auth";
 
@@ -276,9 +276,39 @@ export async function getMonthSummary(
   const prevMonth = month === 1 ? 12 : month - 1;
   const prevYear = month === 1 ? year - 1 : year;
   const prev = monthBounds(prevYear, prevMonth);
-  const [rows, previousRows] = await Promise.all([
+  const [
+    rows,
+    previousRows,
+    allInstruments,
+    allAccounts,
+    catRows,
+    appRows,
+    monthTransfers,
+  ] = await Promise.all([
     listExpenses({ from: start, to: end, limit: 10000 }, userId),
     listExpenses({ from: prev.start, to: prev.end, limit: 10000 }, userId),
+    db
+      .select()
+      .from(instruments)
+      .where(eq(instruments.archived, false))
+      .orderBy(asc(instruments.sortOrder)),
+    db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.archived, false))
+      .orderBy(asc(accounts.sortOrder)),
+    db.select().from(categories),
+    db.select().from(paymentApps),
+    db
+      .select()
+      .from(transfers)
+      .where(
+        and(
+          eq(transfers.userId, userId),
+          gte(transfers.occurredAt, start),
+          lte(transfers.occurredAt, end),
+        ),
+      ),
   ]);
   const totals = sumMath(rows.map((r) => r.math));
   const previousNetPaise = sumMath(
@@ -286,13 +316,13 @@ export async function getMonthSummary(
   ).netSpendPaise;
 
   /* cards */
-  const allInstruments = await db
-    .select()
-    .from(instruments)
-    .where(eq(instruments.archived, false))
-    .orderBy(asc(instruments.sortOrder));
+  const capsByInstrument = await capsForInstruments(
+    allInstruments,
+    end,
+    userId,
+  );
 
-  const cards: CardSummary[] = await Promise.all(allInstruments.map(async (instrument) => {
+  const cards: CardSummary[] = allInstruments.map((instrument) => {
     const mine = rows.filter((r) => r.expense.instrumentId === instrument.id);
     return {
       instrument,
@@ -302,16 +332,11 @@ export async function getMonthSummary(
       rewardUnitsMilli: mine.reduce((s, r) => s + r.expense.rewardUnitsMilli, 0),
       rewardLostPaise: mine.reduce((s, r) => s + r.math.rewardLostToCapPaise, 0),
       txnCount: mine.length,
-      caps: await capsForInstrument(instrument.id, end, userId),
+      caps: capsByInstrument.get(instrument.id) ?? [],
     };
-  }));
+  });
 
   /* accounts */
-  const allAccounts = await db
-    .select()
-    .from(accounts)
-    .where(eq(accounts.archived, false))
-    .orderBy(asc(accounts.sortOrder));
   const accountsSpend = allAccounts.map((account) => {
     const mine = rows.filter((r) => r.expense.accountId === account.id);
     return {
@@ -322,7 +347,6 @@ export async function getMonthSummary(
   });
 
   /* categories — rolled up to their top-level parent */
-  const catRows = await db.select().from(categories);
   const catBySlug = new Map(catRows.map((c) => [c.slug, c]));
   const catAgg = new Map<string, CategorySlice>();
   for (const r of rows) {
@@ -348,7 +372,6 @@ export async function getMonthSummary(
   }
 
   /* payment apps */
-  const appRows = await db.select().from(paymentApps);
   const appBySlug = new Map(appRows.map((a) => [a.slug, a]));
   const appAgg = new Map<string, { slug: string; name: string; colorHex: string; netPaise: number; txnCount: number }>();
   for (const r of rows) {
@@ -389,16 +412,6 @@ export async function getMonthSummary(
   }
 
   /* transfers */
-  const monthTransfers = await db
-    .select()
-    .from(transfers)
-    .where(
-      and(
-        eq(transfers.userId, userId),
-        gte(transfers.occurredAt, start),
-        lte(transfers.occurredAt, end),
-      ),
-    );
   const transfersOut = monthTransfers
     .filter((t) => t.direction === "sent")
     .reduce((s, t) => s + t.amountPaise, 0);
