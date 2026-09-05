@@ -37,7 +37,13 @@ export async function POST(request: Request) {
   try {
     // Ensures a brand-new database has LedgerKit's cards and categories.
     await seedReference(db);
-  } catch {
+  } catch (error) {
+    // Keep credentials and stack traces out of the response, while retaining
+    // enough detail in Vercel Functions logs to diagnose connection failures.
+    console.error("Registration database initialization failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message : "Unknown database error",
+    });
     return fail("The database is unavailable. Please try again shortly.", 503);
   }
 

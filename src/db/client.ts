@@ -2,11 +2,17 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import * as schema from "./schema";
 
-const databaseUrl = process.env.DATABASE_URL;
+// Vercel's Supabase integration provides POSTGRES_URL with the correct pooled
+// host and encoded credentials. Prefer it in production; DATABASE_URL remains
+// the convenient local/CLI fallback.
+const databaseUrl =
+  process.env.POSTGRES_URL ??
+  process.env.DATABASE_URL ??
+  process.env.POSTGRES_PRISMA_URL;
 
 if (!databaseUrl) {
   throw new Error(
-    "DATABASE_URL is not set. Add the Supabase Postgres connection string to your local .env.local and Vercel project settings.",
+    "No Postgres connection URL is configured. Add POSTGRES_URL or DATABASE_URL.",
   );
 }
 
