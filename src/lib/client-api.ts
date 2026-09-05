@@ -31,11 +31,30 @@ async function request<T>(
   init?: RequestInit & { json?: unknown },
 ): Promise<T> {
   const { json, ...rest } = init ?? {};
-  const response = await fetch(url, {
-    ...rest,
-    headers: json ? { "Content-Type": "application/json" } : undefined,
-    body: json ? JSON.stringify(json) : rest.body,
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 15_000);
+  const abort = () => controller.abort();
+  rest.signal?.addEventListener("abort", abort, { once: true });
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...rest,
+      signal: controller.signal,
+      headers: json ? { "Content-Type": "application/json" } : undefined,
+      body: json ? JSON.stringify(json) : rest.body,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        "The server took too long to respond. Please try again in a moment.",
+      );
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+    rest.signal?.removeEventListener("abort", abort);
+  }
   const payload = (await response.json().catch(() => null)) as
     | { ok: true; data: T }
     | { ok: false; error: string }

@@ -53,7 +53,13 @@ export default function ExpensesPage() {
   }, [search]);
 
   const { data: reference } = useReference();
-  const { data: rows, isLoading } = useExpenses({
+  const {
+    data: rows,
+    error,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useExpenses({
     from,
     to,
     search: debounced || undefined,
@@ -95,7 +101,9 @@ export default function ExpensesPage() {
             Expenses
           </h1>
           <p className="hint mt-0.5">
-            {rows
+            {error
+              ? "Could not load expenses"
+              : rows
               ? `${rows.length} ${rows.length === 1 ? "expense" : "expenses"} · ${formatMoney(totals.net)} net · ${formatMoney(totals.reward)} earned back`
               : "Loading"}
           </p>
@@ -212,7 +220,31 @@ export default function ExpensesPage() {
 
       {/* ----------------------------------------------------------- table */}
       <Panel bodyClassName="p-0">
-        {isLoading ? (
+        {error ? (
+          <EmptyState
+            icon={<Receipt className="size-5" />}
+            title="Expenses could not be loaded"
+            body={
+              error instanceof Error
+                ? error.message
+                : "The server did not return the expense list."
+            }
+            action={
+              <Button
+                variant="secondary"
+                onClick={() => refetch()}
+                disabled={isFetching}
+              >
+                {isFetching ? (
+                  <Spinner className="size-4" />
+                ) : (
+                  <RotateCcw className="size-4" />
+                )}
+                Try again
+              </Button>
+            }
+          />
+        ) : isLoading ? (
           <div className="flex justify-center py-20">
             <Spinner className="size-5" />
           </div>

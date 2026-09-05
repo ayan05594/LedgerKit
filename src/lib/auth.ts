@@ -10,11 +10,9 @@ export class AuthenticationError extends Error {
 
 export async function requireUserId() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  const { data, error } = await supabase.auth.getClaims();
+  const userId = data?.claims.sub;
 
-  if (error || !user) throw new AuthenticationError();
-  return user.id;
+  if (error || !userId) throw new AuthenticationError();
+  return userId;
 }

@@ -26,12 +26,11 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data } = await supabase.auth.getClaims();
+  const isAuthenticated = Boolean(data?.claims.sub);
   const path = request.nextUrl.pathname;
 
-  if (!user && !AUTH_PAGES.has(path) && !PUBLIC_API.has(path)) {
+  if (!isAuthenticated && !AUTH_PAGES.has(path) && !PUBLIC_API.has(path)) {
     if (path.startsWith("/api/")) {
       return NextResponse.json(
         { ok: false, error: "Please sign in to continue." },
@@ -43,7 +42,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(login);
   }
 
-  if (user && AUTH_PAGES.has(path)) {
+  if (isAuthenticated && AUTH_PAGES.has(path)) {
     const home = request.nextUrl.clone();
     home.pathname = "/";
     return NextResponse.redirect(home);

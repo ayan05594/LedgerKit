@@ -11,7 +11,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
         defaultOptions: {
           queries: {
             refetchOnWindowFocus: false,
-            retry: 1,
+            // Show API failures immediately instead of extending a serverless
+            // database timeout with an automatic second attempt.
+            retry: false,
             staleTime: 15_000,
           },
         },
