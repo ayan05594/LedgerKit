@@ -705,10 +705,12 @@ export async function computeAccountBalances(authenticatedUserId?: string) {
 /* ---------------------------------------------------------------- people */
 
 export async function createPerson(patch: Record<string, unknown>) {
+  const userId = await requireUserId();
   const rowId = id("per");
   await db.insert(people)
     .values({
       id: rowId,
+      userId,
       name: String(patch.name ?? "Someone"),
       relation: (patch.relation as "friend") ?? "friend",
       colorHex: String(patch.colorHex ?? "#4C6EF5"),
@@ -722,16 +724,23 @@ export async function createPerson(patch: Record<string, unknown>) {
 }
 
 export async function updatePerson(rowId: string, patch: Record<string, unknown>) {
+  const userId = await requireUserId();
   const values: Record<string, unknown> = {};
   for (const k of ["name", "relation", "colorHex", "upiHandle", "phone", "notes", "archived"])
     if (patch[k] !== undefined) values[k] = patch[k];
   if (!Object.keys(values).length) return false;
-  await db.update(people).set(values).where(eq(people.id, rowId));
+  await db
+    .update(people)
+    .set(values)
+    .where(and(eq(people.id, rowId), eq(people.userId, userId)));
   return true;
 }
 
 export async function deletePerson(rowId: string) {
-  await db.delete(people).where(eq(people.id, rowId));
+  const userId = await requireUserId();
+  await db
+    .delete(people)
+    .where(and(eq(people.id, rowId), eq(people.userId, userId)));
   return true;
 }
 

@@ -5,7 +5,6 @@ import {
   instruments,
   merchants,
   paymentApps,
-  people,
   rewardRules,
   settings,
 } from "./schema";
@@ -679,15 +678,6 @@ export async function seedReference(db: DB) {
         void i;
       }
     }
-  }
-
-  if ((await db.select().from(people)).length === 0) {
-    await db.insert(people)
-      .values([
-        { id: "per-1", name: "Rohan", relation: "friend" as const, colorHex: "#4C6EF5", upiHandle: "", phone: "", notes: "", archived: false },
-        { id: "per-2", name: "Ananya", relation: "friend" as const, colorHex: "#E64980", upiHandle: "", phone: "", notes: "", archived: false },
-        { id: "per-3", name: "Home", relation: "family" as const, colorHex: "#12B886", upiHandle: "", phone: "", notes: "", archived: false },
-      ]);
   }
 
   await db.insert(settings)

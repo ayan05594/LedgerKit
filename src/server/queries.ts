@@ -56,7 +56,9 @@ export interface Reference {
   rules: RewardRule[];
 }
 
-export async function getReference(): Promise<Reference> {
+export async function getReference(
+  authenticatedUserId?: string,
+): Promise<Reference> {
   const [categoryRows, merchantRows, appRows, instrumentRows, accountRows, peopleRows, ruleRows] = await Promise.all([
     db
       .select()
@@ -78,11 +80,18 @@ export async function getReference(): Promise<Reference> {
       .from(accounts)
       .where(eq(accounts.archived, false))
       .orderBy(asc(accounts.sortOrder)),
-    db
-      .select()
-      .from(people)
-      .where(eq(people.archived, false))
-      .orderBy(asc(people.name)),
+    authenticatedUserId
+      ? db
+          .select()
+          .from(people)
+          .where(
+            and(
+              eq(people.userId, authenticatedUserId),
+              eq(people.archived, false),
+            ),
+          )
+          .orderBy(asc(people.name))
+      : Promise.resolve([]),
     db
       .select()
       .from(rewardRules)
@@ -495,7 +504,9 @@ export async function getPeopleBalances(
     db
       .select()
       .from(people)
-      .where(eq(people.archived, false))
+      .where(
+        and(eq(people.userId, userId), eq(people.archived, false)),
+      )
       .orderBy(asc(people.name)),
     db
       .select()
@@ -541,7 +552,7 @@ export async function listTransfers(
 })[]> {
   const userId = authenticatedUserId ?? await requireUserId();
   const [peopleRows, rows] = await Promise.all([
-    db.select().from(people),
+    db.select().from(people).where(eq(people.userId, userId)),
     db
       .select()
       .from(transfers)

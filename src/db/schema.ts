@@ -344,21 +344,26 @@ export const refunds = pgTable(
 
 /* ---------------------------------------------------------- people & p2p */
 
-export const people = pgTable("people", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  relation: text("relation", {
-    enum: ["friend", "family", "colleague", "flatmate", "merchant", "other"],
-  })
-    .notNull()
-    .default("friend"),
-  colorHex: text("color_hex").notNull().default("#6B7280"),
-  upiHandle: text("upi_handle").notNull().default(""),
-  phone: text("phone").notNull().default(""),
-  notes: text("notes").notNull().default(""),
-  archived: boolean("archived").notNull().default(false),
-  createdAt: text("created_at").notNull().default(now),
-});
+export const people = pgTable(
+  "people",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id"),
+    name: text("name").notNull(),
+    relation: text("relation", {
+      enum: ["friend", "family", "colleague", "flatmate", "merchant", "other"],
+    })
+      .notNull()
+      .default("friend"),
+    colorHex: text("color_hex").notNull().default("#6B7280"),
+    upiHandle: text("upi_handle").notNull().default(""),
+    phone: text("phone").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    archived: boolean("archived").notNull().default(false),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("people_user_idx").on(t.userId)],
+);
 
 export const transfers = pgTable(
   "transfers",

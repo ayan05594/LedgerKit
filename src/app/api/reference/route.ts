@@ -30,7 +30,7 @@ export async function GET() {
     // missed the original registration-time seed. Repair that once, safely.
     await ensureReferenceData();
     const [reference, accountBalances] = await Promise.all([
-      getReference(),
+      getReference(userId),
       computeAccountBalances(userId),
     ]);
     return { ...reference, accountBalances };
