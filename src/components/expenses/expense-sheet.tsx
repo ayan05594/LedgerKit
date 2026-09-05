@@ -128,7 +128,7 @@ export function ExpenseSheet({
     isLoading: referenceLoading,
     isFetching: referenceFetching,
     refetch: refetchReference,
-  } = useReference();
+  } = useReference(open);
   const { data: existing } = useExpense(open && expenseId ? expenseId : null);
 
   const [form, setForm] = React.useState<FormState>(blank);

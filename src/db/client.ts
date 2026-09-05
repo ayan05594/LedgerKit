@@ -28,7 +28,7 @@ export const sql =
     prepare: false,
     // Summary screens intentionally run independent reads in parallel. A tiny
     // pool avoids serialising dozens of round trips behind one connection.
-    max: 3,
+    max: 5,
     idle_timeout: 20,
     connect_timeout: 10,
   });

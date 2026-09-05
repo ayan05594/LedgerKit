@@ -1,5 +1,4 @@
 import { getMonthSummary } from "@/server/queries";
-import { computeAccountBalances } from "@/server/mutations";
 import { handle } from "@/lib/api";
 import { requireUserId } from "@/lib/auth";
 
@@ -12,10 +11,7 @@ export async function GET(request: Request) {
   const month = Number(url.searchParams.get("month") ?? now.getMonth() + 1);
   return handle(async () => {
     const userId = await requireUserId();
-    const [summary, accountBalances] = await Promise.all([
-      getMonthSummary(year, month, userId),
-      computeAccountBalances(userId),
-    ]);
-    return { summary, accountBalances };
+    const summary = await getMonthSummary(year, month, userId);
+    return { summary };
   });
 }

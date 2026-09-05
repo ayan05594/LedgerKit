@@ -553,7 +553,7 @@ function RuleDialog({
 }) {
   const createRule = useCreateRule();
   const updateRule = useUpdateRule();
-  const { data: reference } = useReference();
+  const { data: reference } = useReference(open);
 
   const [name, setName] = React.useState("");
   const [rate, setRate] = React.useState("");

@@ -344,7 +344,7 @@ function TransferDialog({
   onOpenChange: (v: boolean) => void;
   prefillPersonId: string | null;
 }) {
-  const { data: reference } = useReference();
+  const { data: reference } = useReference(open);
   const createTransfer = useCreateTransfer();
 
   const [direction, setDirection] = React.useState<"sent" | "received">("sent");

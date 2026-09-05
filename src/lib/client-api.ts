@@ -111,11 +111,12 @@ export const keys = {
   pending: ["pending"] as const,
 };
 
-export function useReference() {
+export function useReference(enabled = true) {
   return useQuery({
     queryKey: keys.reference,
     queryFn: () => request<ReferenceData>("/api/reference"),
     staleTime: 60_000,
+    enabled,
   });
 }
 
@@ -123,7 +124,7 @@ export function useSummary(year: number, month: number) {
   return useQuery({
     queryKey: keys.summary(year, month),
     queryFn: () =>
-      request<{ summary: MonthSummary; accountBalances: AccountBalance[] }>(
+      request<{ summary: MonthSummary }>(
         `/api/summary?year=${year}&month=${month}`,
       ),
   });

@@ -114,7 +114,18 @@ export interface ExpenseFilters {
   limit?: number;
 }
 
-async function hydrate(rows: Expense[], userId: string): Promise<ExpenseRow[]> {
+interface HydrationReference {
+  instruments: Instrument[];
+  accounts: Account[];
+  categories: Category[];
+  apps: PaymentApp[];
+}
+
+async function hydrate(
+  rows: Expense[],
+  userId: string,
+  reference?: HydrationReference,
+): Promise<ExpenseRow[]> {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
   const [adj, ref, instrumentRows, accountRows, categoryRows, appRows] = await Promise.all([
@@ -126,10 +137,10 @@ async function hydrate(rows: Expense[], userId: string): Promise<ExpenseRow[]> {
       .select()
       .from(refunds)
       .where(and(eq(refunds.userId, userId), inArray(refunds.expenseId, ids))),
-    db.select().from(instruments),
-    db.select().from(accounts),
-    db.select().from(categories),
-    db.select().from(paymentApps),
+    reference?.instruments ?? db.select().from(instruments),
+    reference?.accounts ?? db.select().from(accounts),
+    reference?.categories ?? db.select().from(categories),
+    reference?.apps ?? db.select().from(paymentApps),
   ]);
 
   const instMap = new Map(instrumentRows.map((i) => [i.id, i]));
@@ -277,16 +288,25 @@ export async function getMonthSummary(
   const prevYear = month === 1 ? year - 1 : year;
   const prev = monthBounds(prevYear, prevMonth);
   const [
-    rows,
-    previousRows,
+    expenseRows,
     allInstruments,
     allAccounts,
     catRows,
     appRows,
     monthTransfers,
   ] = await Promise.all([
-    listExpenses({ from: start, to: end, limit: 10000 }, userId),
-    listExpenses({ from: prev.start, to: prev.end, limit: 10000 }, userId),
+    db
+      .select()
+      .from(expenses)
+      .where(
+        and(
+          eq(expenses.userId, userId),
+          gte(expenses.occurredAt, prev.start),
+          lte(expenses.occurredAt, end),
+        ),
+      )
+      .orderBy(desc(expenses.occurredAt), desc(expenses.createdAt))
+      .limit(20000),
     db
       .select()
       .from(instruments)
@@ -310,18 +330,30 @@ export async function getMonthSummary(
         ),
       ),
   ]);
+  const [hydratedRows, capsByInstrument] = await Promise.all([
+    hydrate(expenseRows, userId, {
+      instruments: allInstruments,
+      accounts: allAccounts,
+      categories: catRows,
+      apps: appRows,
+    }),
+    capsForInstruments(allInstruments, end, userId),
+  ]);
+  const rows = hydratedRows.filter(
+    (row) =>
+      row.expense.occurredAt >= start && row.expense.occurredAt <= end,
+  );
+  const previousRows = hydratedRows.filter(
+    (row) =>
+      row.expense.occurredAt >= prev.start &&
+      row.expense.occurredAt <= prev.end,
+  );
   const totals = sumMath(rows.map((r) => r.math));
   const previousNetPaise = sumMath(
     previousRows.map((r) => r.math),
   ).netSpendPaise;
 
   /* cards */
-  const capsByInstrument = await capsForInstruments(
-    allInstruments,
-    end,
-    userId,
-  );
-
   const cards: CardSummary[] = allInstruments.map((instrument) => {
     const mine = rows.filter((r) => r.expense.instrumentId === instrument.id);
     return {
