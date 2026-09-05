@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { AuthenticationError } from "@/lib/auth";
 
 export function ok<T>(data: T) {
   return NextResponse.json({ ok: true, data });
@@ -13,6 +14,9 @@ export async function handle<T>(fn: () => T | Promise<T>) {
   try {
     return ok(await fn());
   } catch (error) {
+    if (error instanceof AuthenticationError) {
+      return fail(error.message, 401);
+    }
     const message =
       error instanceof Error ? error.message : "Something went wrong";
     return fail(message, 500);

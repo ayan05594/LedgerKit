@@ -8,6 +8,7 @@ import {
   CreditCard,
   Landmark,
   LayoutDashboard,
+  LogOut,
   MoreHorizontal,
   Plus,
   ReceiptText,
@@ -41,6 +42,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
+  const [signingOut, setSigningOut] = React.useState(false);
 
   React.useEffect(() => setMoreOpen(false), [pathname]);
 
@@ -62,6 +64,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  async function signOut() {
+    setSigningOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      window.location.assign("/login");
+    }
+  }
+
+  if (pathname === "/login" || pathname === "/register") {
+    return <>{children}</>;
+  }
 
   const currentLabel =
     NAV.find((item) => isActive(item.href, pathname))?.label ?? "LedgerKit";
@@ -119,6 +134,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <RailLink key={item.href} {...item} pathname={pathname} />
           ))}
         </nav>
+
+        <button
+          type="button"
+          onClick={signOut}
+          disabled={signingOut}
+          className="mb-3 flex items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[0.875rem] font-medium text-ink-2 transition-colors hover:bg-sunken/60 hover:text-ink"
+        >
+          <LogOut className="size-4 text-ink-3" />
+          {signingOut ? "Signing out…" : "Sign out"}
+        </button>
 
         <p className="px-2 text-[0.6875rem] leading-relaxed text-ink-3">
           Rates and caps are seeded from published card terms. Card issuers change
@@ -190,6 +215,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           Rates and caps are seeded from published card terms. Issuers change them
           often — check the numbers on each card page.
         </p>
+        <button
+          type="button"
+          onClick={signOut}
+          disabled={signingOut}
+          className="mt-3 flex w-full items-center gap-3 rounded-[10px] px-3 py-3 text-[0.9375rem] font-medium text-ink-2 active:bg-sunken"
+        >
+          <LogOut className="size-4" />
+          {signingOut ? "Signing out…" : "Sign out"}
+        </button>
       </Sheet>
 
       <ExpenseSheet open={addOpen} onOpenChange={setAddOpen} />

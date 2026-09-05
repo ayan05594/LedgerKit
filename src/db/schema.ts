@@ -205,6 +205,8 @@ export const expenses = pgTable(
   "expenses",
   {
     id: text("id").primaryKey(),
+    /** Supabase Auth user that owns this expense. Legacy pre-auth rows remain null. */
+    userId: text("user_id"),
     occurredAt: text("occurred_at").notNull(), // YYYY-MM-DD
     amountPaise: integer("amount_paise").notNull(),
     description: text("description").notNull().default(""),
@@ -264,6 +266,7 @@ export const expenses = pgTable(
     updatedAt: text("updated_at").notNull().default(now),
   },
   (t) => [
+    index("exp_user_idx").on(t.userId),
     index("exp_date_idx").on(t.occurredAt),
     index("exp_instrument_idx").on(t.instrumentId, t.occurredAt),
     index("exp_category_idx").on(t.categorySlug),
@@ -275,6 +278,7 @@ export const adjustments = pgTable(
   "adjustments",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id"),
     expenseId: text("expense_id")
       .notNull()
       .references(() => expenses.id, { onDelete: "cascade" }),
@@ -306,13 +310,17 @@ export const adjustments = pgTable(
     notes: text("notes").notNull().default(""),
     createdAt: text("created_at").notNull().default(now),
   },
-  (t) => [index("adj_expense_idx").on(t.expenseId)],
+  (t) => [
+    index("adj_user_idx").on(t.userId),
+    index("adj_expense_idx").on(t.expenseId),
+  ],
 );
 
 export const refunds = pgTable(
   "refunds",
   {
     id: text("id").primaryKey(),
+    userId: text("user_id"),
     expenseId: text("expense_id")
       .notNull()
       .references(() => expenses.id, { onDelete: "cascade" }),
@@ -328,7 +336,10 @@ export const refunds = pgTable(
     notes: text("notes").notNull().default(""),
     createdAt: text("created_at").notNull().default(now),
   },
-  (t) => [index("ref_expense_idx").on(t.expenseId)],
+  (t) => [
+    index("ref_user_idx").on(t.userId),
+    index("ref_expense_idx").on(t.expenseId),
+  ],
 );
 
 /* ---------------------------------------------------------- people & p2p */
@@ -353,6 +364,8 @@ export const transfers = pgTable(
   "transfers",
   {
     id: text("id").primaryKey(),
+    /** Supabase Auth user that owns this transfer. Legacy pre-auth rows remain null. */
+    userId: text("user_id"),
     direction: text("direction", { enum: ["sent", "received"] }).notNull(),
     personId: text("person_id").references(() => people.id, {
       onDelete: "set null",
@@ -376,7 +389,11 @@ export const transfers = pgTable(
     note: text("note").notNull().default(""),
     createdAt: text("created_at").notNull().default(now),
   },
-  (t) => [index("tr_person_idx").on(t.personId), index("tr_date_idx").on(t.occurredAt)],
+  (t) => [
+    index("tr_user_idx").on(t.userId),
+    index("tr_person_idx").on(t.personId),
+    index("tr_date_idx").on(t.occurredAt),
+  ],
 );
 
 /* ------------------------------------------------------------- key/value */

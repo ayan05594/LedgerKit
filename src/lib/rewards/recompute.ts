@@ -15,6 +15,7 @@ import {
 } from "./engine";
 import { yearBounds, periodKey } from "./periods";
 import type { CapPeriod } from "./periods";
+import { requireUserId } from "@/lib/auth";
 
 function json<T>(raw: string, fallback: T): T {
   try {
@@ -102,13 +103,21 @@ function toEngineExpense(row: Expense, refundedPaise: number): EngineExpense {
 }
 
 /** Sum of received refunds keyed by expense id. */
-async function refundMap(expenseIds: string[]): Promise<Map<string, number>> {
+async function refundMap(
+  expenseIds: string[],
+  userId: string,
+): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   if (!expenseIds.length) return map;
   const rows = await db
     .select()
     .from(refunds)
-    .where(inArray(refunds.expenseId, expenseIds));
+    .where(
+      and(
+        eq(refunds.userId, userId),
+        inArray(refunds.expenseId, expenseIds),
+      ),
+    );
   for (const r of rows) {
     if (r.status !== "received") continue;
     map.set(r.expenseId, (map.get(r.expenseId) ?? 0) + r.amountPaise);
@@ -123,6 +132,7 @@ async function refundMap(expenseIds: string[]): Promise<Map<string, number>> {
  * once the cap is gone.
  */
 export async function recomputeInstrumentYear(instrumentId: string, year: number) {
+  const userId = await requireUserId();
   const [inst] = await db
     .select()
     .from(instruments)
@@ -142,6 +152,7 @@ export async function recomputeInstrumentYear(instrumentId: string, year: number
     .from(expenses)
     .where(
       and(
+        eq(expenses.userId, userId),
         eq(expenses.instrumentId, instrumentId),
         gte(expenses.occurredAt, start),
         lte(expenses.occurredAt, end),
@@ -150,7 +161,7 @@ export async function recomputeInstrumentYear(instrumentId: string, year: number
     .orderBy(asc(expenses.occurredAt), asc(expenses.createdAt), asc(expenses.id));
 
   const engineInst = toEngineInstrument(inst);
-  const refunded = await refundMap(rows.map((r) => r.id));
+  const refunded = await refundMap(rows.map((r) => r.id), userId);
   const ledger = newCapLedger();
 
   await db.transaction(async (tx) => {
@@ -174,7 +185,7 @@ export async function recomputeInstrumentYear(instrumentId: string, year: number
             ? `Manual override · engine said ${outcome.explain}`
             : outcome.explain,
         })
-        .where(eq(expenses.id, row.id));
+        .where(and(eq(expenses.id, row.id), eq(expenses.userId, userId)));
     }
   });
 }
@@ -197,6 +208,7 @@ export async function capLedgerFor(
   instrumentId: string,
   year: number,
 ): Promise<{ ledger: CapLedger; inst: EngineInstrument; rules: EngineRule[] } | null> {
+  const userId = await requireUserId();
   const [inst] = await db
     .select()
     .from(instruments)
@@ -216,6 +228,7 @@ export async function capLedgerFor(
     .from(expenses)
     .where(
       and(
+        eq(expenses.userId, userId),
         eq(expenses.instrumentId, instrumentId),
         gte(expenses.occurredAt, start),
         lte(expenses.occurredAt, end),
@@ -224,7 +237,7 @@ export async function capLedgerFor(
     .orderBy(asc(expenses.occurredAt), asc(expenses.createdAt), asc(expenses.id));
 
   const engineInst = toEngineInstrument(inst);
-  const refunded = await refundMap(rows.map((r) => r.id));
+  const refunded = await refundMap(rows.map((r) => r.id), userId);
   const ledger = newCapLedger();
   for (const row of rows) {
     evaluateExpense(
@@ -261,6 +274,7 @@ export async function previewReward(input: {
   flags?: Record<string, boolean>;
   excludeExpenseId?: string;
 }) {
+  const userId = await requireUserId();
   const built = await capLedgerFor(input.instrumentId, Number(input.occurredAt.slice(0, 4)));
   if (!built) return null;
 
@@ -269,7 +283,12 @@ export async function previewReward(input: {
     const [existing] = await db
       .select()
       .from(expenses)
-      .where(eq(expenses.id, input.excludeExpenseId))
+      .where(
+        and(
+          eq(expenses.id, input.excludeExpenseId),
+          eq(expenses.userId, userId),
+        ),
+      )
       .limit(1);
     if (existing?.rewardUnitsMilli) {
       const rule = built.rules.find((r) => r.id === existing.rewardRuleId);

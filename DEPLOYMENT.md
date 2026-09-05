@@ -8,8 +8,7 @@ backend routes, while Supabase provides durable Postgres storage.
 - A Supabase project, its database password, and both connection URIs from the
   dashboard's **Connect** panel.
 - A Vercel account connected to the Git repository (or the Vercel CLI).
-- A decision about access control. LedgerKit is currently a single-ledger app
-  with no login; a public Vercel URL would let anyone read or change the ledger.
+- A private registration secret that you will share only with allowed users.
 - A decision about the existing `data/ledgerkit.db`: start with a clean database,
   seed only the built-in reference data, or migrate the existing local rows.
 
@@ -31,7 +30,8 @@ npm run db:migrate
 npm run db:seed
 ```
 
-`db:migrate` applies `supabase/migrations/20260905160000_initial_schema.sql`.
+`db:migrate` applies the checked-in migrations, including the initial schema
+and the user-ownership columns required by authentication.
 `db:seed` adds the built-in categories, merchants, payment apps, accounts, cards,
 reward rules, and sample people. It does not add demo transactions.
 
@@ -40,11 +40,21 @@ migration history; do not also apply the same file with `supabase db push`.
 
 ## 2. Configure Vercel
 
-Add one environment variable to Production, Preview, and Development as needed:
+Add these environment variables to Production, Preview, and Development as
+needed:
 
 ```text
 DATABASE_URL=<Supabase Transaction pooler URI on port 6543>
+NEXT_PUBLIC_SUPABASE_URL=<Supabase project URL>
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase publishable key>
+SUPABASE_SECRET_KEY=<Supabase server secret key>
+REGISTRATION_SECRET=<private secret entered during registration>
 ```
+
+The server secret and registration secret must remain server-only. Registration
+creates an email/password user with email already confirmed, so no OTP or
+confirmation email is required. Expenses, refunds, adjustments, transfers, and
+demo-data state are scoped to the signed-in Supabase user.
 
 Use the **Transaction pooler** URI for Vercel's serverless runtime. The database
 client already disables prepared statements, as required by transaction pooling.
@@ -57,8 +67,8 @@ vercel
 vercel --prod
 ```
 
-After deployment, check `/api/reference` and create one test expense before using
-the ledger for real data.
+After deployment, open `/register`, create the first account, and create one test
+expense before using the ledger for real data.
 
 ## Ongoing schema changes
 

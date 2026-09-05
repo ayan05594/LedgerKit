@@ -18,6 +18,7 @@ import {
 } from "@/db/schema";
 import { recomputeForDate, recomputeInstrumentYear } from "@/lib/rewards/recompute";
 import { todayISO } from "@/lib/rewards/periods";
+import { requireUserId } from "@/lib/auth";
 
 const id = (p: string) => `${p}_${nanoid(12)}`;
 const stamp = () => new Date().toISOString();
@@ -68,6 +69,7 @@ function reimbursementStatusFor(
 }
 
 export async function createExpense(input: ExpenseInput) {
+  const userId = await requireUserId();
   const rowId = id("exp");
   const reimbursable = !!input.reimbursable;
   const expected = reimbursable ? (input.reimbursementExpectedPaise ?? 0) : 0;
@@ -75,6 +77,7 @@ export async function createExpense(input: ExpenseInput) {
   await db.insert(expenses)
     .values({
       id: rowId,
+      userId,
       occurredAt: input.occurredAt,
       amountPaise: input.amountPaise,
       description: input.description ?? "",
@@ -106,7 +109,12 @@ export async function createExpense(input: ExpenseInput) {
 }
 
 export async function updateExpense(rowId: string, input: Partial<ExpenseInput>) {
-  const [existing] = await db.select().from(expenses).where(eq(expenses.id, rowId)).limit(1);
+  const userId = await requireUserId();
+  const [existing] = await db
+    .select()
+    .from(expenses)
+    .where(and(eq(expenses.id, rowId), eq(expenses.userId, userId)))
+    .limit(1);
   if (!existing) return null;
 
   const reimbursable = input.reimbursable ?? existing.reimbursable;
@@ -152,7 +160,7 @@ export async function updateExpense(rowId: string, input: Partial<ExpenseInput>)
           : existing.rewardOverridePaise,
       updatedAt: stamp(),
     })
-    .where(eq(expenses.id, rowId));
+    .where(and(eq(expenses.id, rowId), eq(expenses.userId, userId)));
 
   // Both the old and the new card need their caps replayed.
   await recomputeForDate(existing.instrumentId, existing.occurredAt);
@@ -164,9 +172,16 @@ export async function updateExpense(rowId: string, input: Partial<ExpenseInput>)
 }
 
 export async function deleteExpense(rowId: string) {
-  const [existing] = await db.select().from(expenses).where(eq(expenses.id, rowId)).limit(1);
+  const userId = await requireUserId();
+  const [existing] = await db
+    .select()
+    .from(expenses)
+    .where(and(eq(expenses.id, rowId), eq(expenses.userId, userId)))
+    .limit(1);
   if (!existing) return false;
-  await db.delete(expenses).where(eq(expenses.id, rowId));
+  await db
+    .delete(expenses)
+    .where(and(eq(expenses.id, rowId), eq(expenses.userId, userId)));
   await recomputeForDate(existing.instrumentId, existing.occurredAt);
   return true;
 }
@@ -186,10 +201,18 @@ export interface AdjustmentInput {
 }
 
 export async function addAdjustment(expenseId: string, input: AdjustmentInput) {
+  const userId = await requireUserId();
+  const [parent] = await db
+    .select({ id: expenses.id })
+    .from(expenses)
+    .where(and(eq(expenses.id, expenseId), eq(expenses.userId, userId)))
+    .limit(1);
+  if (!parent) return null;
   const rowId = id("adj");
   await db.insert(adjustments)
     .values({
       id: rowId,
+      userId,
       expenseId,
       label: input.label,
       kind: input.kind ?? "instant_discount",
@@ -200,12 +223,17 @@ export async function addAdjustment(expenseId: string, input: AdjustmentInput) {
       notes: input.notes ?? "",
       createdAt: stamp(),
     });
-  await touch(expenseId);
+  await touch(expenseId, userId);
   return rowId;
 }
 
 export async function updateAdjustment(rowId: string, input: Partial<AdjustmentInput>) {
-  const [existing] = await db.select().from(adjustments).where(eq(adjustments.id, rowId)).limit(1);
+  const userId = await requireUserId();
+  const [existing] = await db
+    .select()
+    .from(adjustments)
+    .where(and(eq(adjustments.id, rowId), eq(adjustments.userId, userId)))
+    .limit(1);
   if (!existing) return false;
   await db.update(adjustments)
     .set({
@@ -218,16 +246,23 @@ export async function updateAdjustment(rowId: string, input: Partial<AdjustmentI
         input.receivedAt !== undefined ? input.receivedAt : existing.receivedAt,
       notes: input.notes ?? existing.notes,
     })
-    .where(eq(adjustments.id, rowId));
-  await touch(existing.expenseId);
+    .where(and(eq(adjustments.id, rowId), eq(adjustments.userId, userId)));
+  await touch(existing.expenseId, userId);
   return true;
 }
 
 export async function deleteAdjustment(rowId: string) {
-  const [existing] = await db.select().from(adjustments).where(eq(adjustments.id, rowId)).limit(1);
+  const userId = await requireUserId();
+  const [existing] = await db
+    .select()
+    .from(adjustments)
+    .where(and(eq(adjustments.id, rowId), eq(adjustments.userId, userId)))
+    .limit(1);
   if (!existing) return false;
-  await db.delete(adjustments).where(eq(adjustments.id, rowId));
-  await touch(existing.expenseId);
+  await db
+    .delete(adjustments)
+    .where(and(eq(adjustments.id, rowId), eq(adjustments.userId, userId)));
+  await touch(existing.expenseId, userId);
   return true;
 }
 
@@ -244,12 +279,18 @@ export interface RefundInput {
 }
 
 export async function addRefund(expenseId: string, input: RefundInput) {
-  const [parent] = await db.select().from(expenses).where(eq(expenses.id, expenseId)).limit(1);
+  const userId = await requireUserId();
+  const [parent] = await db
+    .select()
+    .from(expenses)
+    .where(and(eq(expenses.id, expenseId), eq(expenses.userId, userId)))
+    .limit(1);
   if (!parent) return null;
   const rowId = id("ref");
   await db.insert(refunds)
     .values({
       id: rowId,
+      userId,
       expenseId,
       amountPaise: input.amountPaise,
       refundedAt: input.refundedAt ?? todayISO(),
@@ -262,12 +303,17 @@ export async function addRefund(expenseId: string, input: RefundInput) {
     });
   // A received refund shrinks the reward-eligible amount, so replay the card.
   await recomputeForDate(parent.instrumentId, parent.occurredAt);
-  await touch(expenseId);
+  await touch(expenseId, userId);
   return rowId;
 }
 
 export async function updateRefund(rowId: string, input: Partial<RefundInput>) {
-  const [existing] = await db.select().from(refunds).where(eq(refunds.id, rowId)).limit(1);
+  const userId = await requireUserId();
+  const [existing] = await db
+    .select()
+    .from(refunds)
+    .where(and(eq(refunds.id, rowId), eq(refunds.userId, userId)))
+    .limit(1);
   if (!existing) return false;
   await db.update(refunds)
     .set({
@@ -283,28 +329,45 @@ export async function updateRefund(rowId: string, input: Partial<RefundInput>) {
       toAccountId:
         input.toAccountId !== undefined ? input.toAccountId : existing.toAccountId,
     })
-    .where(eq(refunds.id, rowId));
+    .where(and(eq(refunds.id, rowId), eq(refunds.userId, userId)));
   const [parent] = await db
     .select()
     .from(expenses)
-    .where(eq(expenses.id, existing.expenseId))
+    .where(
+      and(
+        eq(expenses.id, existing.expenseId),
+        eq(expenses.userId, userId),
+      ),
+    )
     .limit(1);
   if (parent) await recomputeForDate(parent.instrumentId, parent.occurredAt);
-  await touch(existing.expenseId);
+  await touch(existing.expenseId, userId);
   return true;
 }
 
 export async function deleteRefund(rowId: string) {
-  const [existing] = await db.select().from(refunds).where(eq(refunds.id, rowId)).limit(1);
+  const userId = await requireUserId();
+  const [existing] = await db
+    .select()
+    .from(refunds)
+    .where(and(eq(refunds.id, rowId), eq(refunds.userId, userId)))
+    .limit(1);
   if (!existing) return false;
-  await db.delete(refunds).where(eq(refunds.id, rowId));
+  await db
+    .delete(refunds)
+    .where(and(eq(refunds.id, rowId), eq(refunds.userId, userId)));
   const [parent] = await db
     .select()
     .from(expenses)
-    .where(eq(expenses.id, existing.expenseId))
+    .where(
+      and(
+        eq(expenses.id, existing.expenseId),
+        eq(expenses.userId, userId),
+      ),
+    )
     .limit(1);
   if (parent) await recomputeForDate(parent.instrumentId, parent.occurredAt);
-  await touch(existing.expenseId);
+  await touch(existing.expenseId, userId);
   return true;
 }
 
@@ -315,7 +378,12 @@ export async function recordReimbursement(
   amountPaise: number,
   note?: string,
 ) {
-  const [existing] = await db.select().from(expenses).where(eq(expenses.id, expenseId)).limit(1);
+  const userId = await requireUserId();
+  const [existing] = await db
+    .select()
+    .from(expenses)
+    .where(and(eq(expenses.id, expenseId), eq(expenses.userId, userId)))
+    .limit(1);
   if (!existing) return false;
   const received = Math.max(
     0,
@@ -335,21 +403,22 @@ export async function recordReimbursement(
       reimbursementNote: note ?? existing.reimbursementNote,
       updatedAt: stamp(),
     })
-    .where(eq(expenses.id, expenseId));
+    .where(and(eq(expenses.id, expenseId), eq(expenses.userId, userId)));
   return true;
 }
 
 export async function writeOffReimbursement(expenseId: string) {
+  const userId = await requireUserId();
   await db.update(expenses)
     .set({ reimbursementStatus: "written_off", updatedAt: stamp() })
-    .where(eq(expenses.id, expenseId));
+    .where(and(eq(expenses.id, expenseId), eq(expenses.userId, userId)));
   return true;
 }
 
-async function touch(expenseId: string) {
+async function touch(expenseId: string, userId: string) {
   await db.update(expenses)
     .set({ updatedAt: stamp() })
-    .where(eq(expenses.id, expenseId));
+    .where(and(eq(expenses.id, expenseId), eq(expenses.userId, userId)));
 }
 
 /* ----------------------------------------------------------- instruments */
@@ -539,6 +608,7 @@ export async function deleteAccount(rowId: string) {
  * plus refunds and money received, since the opening date.
  */
 export async function computeAccountBalances() {
+  const userId = await requireUserId();
   const all = await db.select().from(accounts);
   return Promise.all(all.map(async (account) => {
     const [[spentRow], [refundedRow], [sentRow], [receivedRow]] = await Promise.all([
@@ -547,6 +617,7 @@ export async function computeAccountBalances() {
         .from(expenses)
         .where(
           and(
+            eq(expenses.userId, userId),
             eq(expenses.accountId, account.id),
             gte(expenses.occurredAt, account.openingDate),
           ),
@@ -556,6 +627,7 @@ export async function computeAccountBalances() {
         .from(refunds)
         .where(
           and(
+            eq(refunds.userId, userId),
             eq(refunds.toAccountId, account.id),
             eq(refunds.status, "received"),
             gte(refunds.refundedAt, account.openingDate),
@@ -566,6 +638,7 @@ export async function computeAccountBalances() {
         .from(transfers)
         .where(
           and(
+            eq(transfers.userId, userId),
             eq(transfers.accountId, account.id),
             eq(transfers.direction, "sent"),
             gte(transfers.occurredAt, account.openingDate),
@@ -576,6 +649,7 @@ export async function computeAccountBalances() {
         .from(transfers)
         .where(
           and(
+            eq(transfers.userId, userId),
             eq(transfers.accountId, account.id),
             eq(transfers.direction, "received"),
             gte(transfers.occurredAt, account.openingDate),
@@ -634,10 +708,12 @@ export async function deletePerson(rowId: string) {
 }
 
 export async function createTransfer(patch: Record<string, unknown>) {
+  const userId = await requireUserId();
   const rowId = id("tr");
   await db.insert(transfers)
     .values({
       id: rowId,
+      userId,
       direction: (patch.direction as "sent") ?? "sent",
       personId: (patch.personId as string) ?? null,
       amountPaise: Number(patch.amountPaise ?? 0),
@@ -656,6 +732,7 @@ export async function createTransfer(patch: Record<string, unknown>) {
 }
 
 export async function updateTransfer(rowId: string, patch: Record<string, unknown>) {
+  const userId = await requireUserId();
   const values: Record<string, unknown> = {};
   for (const k of [
     "direction", "personId", "amountPaise", "occurredAt", "instrumentId",
@@ -663,12 +740,18 @@ export async function updateTransfer(rowId: string, patch: Record<string, unknow
   ])
     if (patch[k] !== undefined) values[k] = patch[k];
   if (!Object.keys(values).length) return false;
-  await db.update(transfers).set(values).where(eq(transfers.id, rowId));
+  await db
+    .update(transfers)
+    .set(values)
+    .where(and(eq(transfers.id, rowId), eq(transfers.userId, userId)));
   return true;
 }
 
 export async function deleteTransfer(rowId: string) {
-  await db.delete(transfers).where(eq(transfers.id, rowId));
+  const userId = await requireUserId();
+  await db
+    .delete(transfers)
+    .where(and(eq(transfers.id, rowId), eq(transfers.userId, userId)));
   return true;
 }
 
@@ -745,22 +828,30 @@ export async function createPaymentApp(patch: Record<string, unknown>) {
 /* ------------------------------------------------------------------ misc */
 
 export async function setSetting(key: string, value: string) {
+  const userId = await requireUserId();
+  const ownedKey = `${userId}:${key}`;
   await db.insert(settings)
-    .values({ key, value })
+    .values({ key: ownedKey, value })
     .onConflictDoUpdate({ target: settings.key, set: { value } });
 }
 
 export async function getSetting(key: string): Promise<string | null> {
-  const [row] = await db.select().from(settings).where(eq(settings.key, key)).limit(1);
+  const userId = await requireUserId();
+  const [row] = await db
+    .select()
+    .from(settings)
+    .where(eq(settings.key, `${userId}:${key}`))
+    .limit(1);
   return row?.value ?? null;
 }
 
 export async function clearTransactions() {
+  const userId = await requireUserId();
   await db.transaction(async (tx) => {
-    await tx.delete(adjustments);
-    await tx.delete(refunds);
-    await tx.delete(expenses);
-    await tx.delete(transfers);
+    await tx.delete(adjustments).where(eq(adjustments.userId, userId));
+    await tx.delete(refunds).where(eq(refunds.userId, userId));
+    await tx.delete(expenses).where(eq(expenses.userId, userId));
+    await tx.delete(transfers).where(eq(transfers.userId, userId));
   });
   await setSetting("demo_loaded", "no");
   return true;

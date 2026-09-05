@@ -8,6 +8,13 @@
       "when": 1788625476822,
       "tag": "20260905160000_initial_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788637902556,
+      "tag": "0001_unique_callisto",
+      "breakpoints": true
     }
   ]
 }

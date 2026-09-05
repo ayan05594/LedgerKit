@@ -31,6 +31,7 @@ import { computeExpenseMath, sumMath, type ExpenseMath } from "@/lib/derive";
 import { monthBounds } from "@/lib/rewards/periods";
 import { capsForInstrument } from "@/lib/rewards/recompute";
 import type { CapStatus } from "@/lib/rewards/engine";
+import { requireUserId } from "@/lib/auth";
 
 export interface ExpenseRow {
   expense: Expense;
@@ -113,12 +114,18 @@ export interface ExpenseFilters {
   limit?: number;
 }
 
-async function hydrate(rows: Expense[]): Promise<ExpenseRow[]> {
+async function hydrate(rows: Expense[], userId: string): Promise<ExpenseRow[]> {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
   const [adj, ref, instrumentRows, accountRows, categoryRows, appRows] = await Promise.all([
-    db.select().from(adjustments).where(inArray(adjustments.expenseId, ids)),
-    db.select().from(refunds).where(inArray(refunds.expenseId, ids)),
+    db
+      .select()
+      .from(adjustments)
+      .where(and(eq(adjustments.userId, userId), inArray(adjustments.expenseId, ids))),
+    db
+      .select()
+      .from(refunds)
+      .where(and(eq(refunds.userId, userId), inArray(refunds.expenseId, ids))),
     db.select().from(instruments),
     db.select().from(accounts),
     db.select().from(categories),
@@ -167,7 +174,8 @@ async function hydrate(rows: Expense[]): Promise<ExpenseRow[]> {
 }
 
 export async function listExpenses(f: ExpenseFilters = {}): Promise<ExpenseRow[]> {
-  const clauses = [];
+  const userId = await requireUserId();
+  const clauses = [eq(expenses.userId, userId)];
   if (f.from) clauses.push(gte(expenses.occurredAt, f.from));
   if (f.to) clauses.push(lte(expenses.occurredAt, f.to));
   if (f.instrumentId) clauses.push(eq(expenses.instrumentId, f.instrumentId));
@@ -183,7 +191,7 @@ export async function listExpenses(f: ExpenseFilters = {}): Promise<ExpenseRow[]
         like(sql`lower(${expenses.merchantName})`, q),
         like(sql`lower(${expenses.customLabel})`, q),
         like(sql`lower(${expenses.notes})`, q),
-      ),
+      )!,
     );
   }
 
@@ -194,14 +202,19 @@ export async function listExpenses(f: ExpenseFilters = {}): Promise<ExpenseRow[]
     .orderBy(desc(expenses.occurredAt), desc(expenses.createdAt))
     .limit(f.limit ?? 500);
 
-  const hydrated = await hydrate(rows);
+  const hydrated = await hydrate(rows, userId);
   return f.hasRefund ? hydrated.filter((r) => r.refunds.length > 0) : hydrated;
 }
 
 export async function getExpense(id: string): Promise<ExpenseRow | null> {
-  const [row] = await db.select().from(expenses).where(eq(expenses.id, id)).limit(1);
+  const userId = await requireUserId();
+  const [row] = await db
+    .select()
+    .from(expenses)
+    .where(and(eq(expenses.id, id), eq(expenses.userId, userId)))
+    .limit(1);
   if (!row) return null;
-  return (await hydrate([row]))[0] ?? null;
+  return (await hydrate([row], userId))[0] ?? null;
 }
 
 /* --------------------------------------------------------------- summary */
@@ -251,6 +264,7 @@ export interface MonthSummary {
 }
 
 export async function getMonthSummary(year: number, month: number): Promise<MonthSummary> {
+  const userId = await requireUserId();
   const { start, end } = monthBounds(year, month);
   const rows = await listExpenses({ from: start, to: end, limit: 10000 });
   const totals = sumMath(rows.map((r) => r.math));
@@ -369,7 +383,13 @@ export async function getMonthSummary(year: number, month: number): Promise<Mont
   const monthTransfers = await db
     .select()
     .from(transfers)
-    .where(and(gte(transfers.occurredAt, start), lte(transfers.occurredAt, end)));
+    .where(
+      and(
+        eq(transfers.userId, userId),
+        gte(transfers.occurredAt, start),
+        lte(transfers.occurredAt, end),
+      ),
+    );
   const transfersOut = monthTransfers
     .filter((t) => t.direction === "sent")
     .reduce((s, t) => s + t.amountPaise, 0);
@@ -414,12 +434,16 @@ export interface PersonBalance {
 }
 
 export async function getPeopleBalances(): Promise<PersonBalance[]> {
+  const userId = await requireUserId();
   const allPeople = await db
     .select()
     .from(people)
     .where(eq(people.archived, false))
     .orderBy(asc(people.name));
-  const allTransfers = await db.select().from(transfers);
+  const allTransfers = await db
+    .select()
+    .from(transfers)
+    .where(eq(transfers.userId, userId));
 
   return allPeople.map((person) => {
     const mine = allTransfers.filter((t) => t.personId === person.id);
@@ -454,11 +478,13 @@ export async function listTransfers(limit = 200): Promise<(Transfer & {
   personName: string;
   personColor: string;
 })[]> {
+  const userId = await requireUserId();
   const peopleRows = await db.select().from(people);
   const peopleMap = new Map(peopleRows.map((p) => [p.id, p]));
   const rows = await db
     .select()
     .from(transfers)
+    .where(eq(transfers.userId, userId))
     .orderBy(desc(transfers.occurredAt), desc(transfers.createdAt))
     .limit(limit);
   return rows.map((t) => ({
@@ -479,27 +505,39 @@ export interface PendingSummary {
 }
 
 export async function getPending(): Promise<PendingSummary> {
+  const userId = await requireUserId();
   const reimbursementRows = await hydrate(
     await db
       .select()
       .from(expenses)
       .where(
         and(
+          eq(expenses.userId, userId),
           eq(expenses.reimbursable, true),
           inArray(expenses.reimbursementStatus, ["pending", "partial"]),
         ),
       )
       .orderBy(asc(expenses.reimbursementDueDate), desc(expenses.occurredAt)),
+    userId,
   );
 
   const pendingRefundIds = (await db
     .select({ id: refunds.expenseId })
     .from(refunds)
-    .where(eq(refunds.status, "pending")))
+    .where(and(eq(refunds.userId, userId), eq(refunds.status, "pending"))))
     .map((r) => r.id);
   const refundRows = pendingRefundIds.length
     ? await hydrate(
-        await db.select().from(expenses).where(inArray(expenses.id, pendingRefundIds)),
+        await db
+          .select()
+          .from(expenses)
+          .where(
+            and(
+              eq(expenses.userId, userId),
+              inArray(expenses.id, pendingRefundIds),
+            ),
+          ),
+        userId,
       )
     : [];
 
