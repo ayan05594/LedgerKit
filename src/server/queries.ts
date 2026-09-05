@@ -173,8 +173,11 @@ async function hydrate(rows: Expense[], userId: string): Promise<ExpenseRow[]> {
   });
 }
 
-export async function listExpenses(f: ExpenseFilters = {}): Promise<ExpenseRow[]> {
-  const userId = await requireUserId();
+export async function listExpenses(
+  f: ExpenseFilters = {},
+  authenticatedUserId?: string,
+): Promise<ExpenseRow[]> {
+  const userId = authenticatedUserId ?? await requireUserId();
   const clauses = [eq(expenses.userId, userId)];
   if (f.from) clauses.push(gte(expenses.occurredAt, f.from));
   if (f.to) clauses.push(lte(expenses.occurredAt, f.to));
@@ -263,17 +266,23 @@ export interface MonthSummary {
   previousNetPaise: number;
 }
 
-export async function getMonthSummary(year: number, month: number): Promise<MonthSummary> {
-  const userId = await requireUserId();
+export async function getMonthSummary(
+  year: number,
+  month: number,
+  authenticatedUserId?: string,
+): Promise<MonthSummary> {
+  const userId = authenticatedUserId ?? await requireUserId();
   const { start, end } = monthBounds(year, month);
-  const rows = await listExpenses({ from: start, to: end, limit: 10000 });
-  const totals = sumMath(rows.map((r) => r.math));
-
   const prevMonth = month === 1 ? 12 : month - 1;
   const prevYear = month === 1 ? year - 1 : year;
   const prev = monthBounds(prevYear, prevMonth);
+  const [rows, previousRows] = await Promise.all([
+    listExpenses({ from: start, to: end, limit: 10000 }, userId),
+    listExpenses({ from: prev.start, to: prev.end, limit: 10000 }, userId),
+  ]);
+  const totals = sumMath(rows.map((r) => r.math));
   const previousNetPaise = sumMath(
-    (await listExpenses({ from: prev.start, to: prev.end, limit: 10000 })).map((r) => r.math),
+    previousRows.map((r) => r.math),
   ).netSpendPaise;
 
   /* cards */
@@ -293,7 +302,7 @@ export async function getMonthSummary(year: number, month: number): Promise<Mont
       rewardUnitsMilli: mine.reduce((s, r) => s + r.expense.rewardUnitsMilli, 0),
       rewardLostPaise: mine.reduce((s, r) => s + r.math.rewardLostToCapPaise, 0),
       txnCount: mine.length,
-      caps: await capsForInstrument(instrument.id, end),
+      caps: await capsForInstrument(instrument.id, end, userId),
     };
   }));
 

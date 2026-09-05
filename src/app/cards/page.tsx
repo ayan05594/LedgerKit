@@ -2,14 +2,20 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronRight, CreditCard, Plus } from "lucide-react";
+import { ChevronRight, CreditCard, Plus, RefreshCw, TriangleAlert } from "lucide-react";
 import { useCreateInstrument, useReference, useSummary } from "@/lib/client-api";
 import { formatMoney, formatMoneyShort, percentFromBps } from "@/lib/money";
-import { Button, Chip, Panel, Spinner } from "@/components/ui/primitives";
+import { Button, Chip, EmptyState, Panel, Spinner } from "@/components/ui/primitives";
 
 export default function CardsPage() {
   const now = new Date();
-  const { data } = useSummary(now.getFullYear(), now.getMonth() + 1);
+  const {
+    data,
+    error,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useSummary(now.getFullYear(), now.getMonth() + 1);
   const { data: reference } = useReference();
   const createInstrument = useCreateInstrument();
 
@@ -44,7 +50,25 @@ export default function CardsPage() {
         </Button>
       </header>
 
-      {!summary ? (
+      {error ? (
+        <Panel>
+          <EmptyState
+            icon={<TriangleAlert className="size-5" />}
+            title="Cards could not be loaded"
+            body={error.message}
+            action={
+              <Button
+                variant="secondary"
+                loading={isFetching}
+                onClick={() => void refetch()}
+              >
+                <RefreshCw className="size-4" />
+                Try again
+              </Button>
+            }
+          />
+        </Panel>
+      ) : isLoading || !summary ? (
         <div className="flex justify-center py-20">
           <Spinner className="size-5" />
         </div>

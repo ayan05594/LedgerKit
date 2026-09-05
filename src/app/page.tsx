@@ -12,6 +12,7 @@ import {
   Receipt,
   RotateCcw,
   Sparkles,
+  TriangleAlert,
   Wallet,
 } from "lucide-react";
 import {
@@ -47,7 +48,10 @@ export default function DashboardPage() {
     year: now.getFullYear(),
     month: now.getMonth() + 1,
   });
-  const { data, isLoading } = useSummary(cursor.year, cursor.month);
+  const { data, error, isLoading, isFetching, refetch } = useSummary(
+    cursor.year,
+    cursor.month,
+  );
   const loadDemo = useLoadDemo();
   const sheet = useExpenseSheet();
   const reduce = useReducedMotion();
@@ -117,7 +121,27 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {isLoading && (
+      {error && (
+        <Panel>
+          <EmptyState
+            icon={<TriangleAlert className="size-5" />}
+            title="Your dashboard could not be loaded"
+            body={error.message}
+            action={
+              <Button
+                variant="secondary"
+                loading={isFetching}
+                onClick={() => void refetch()}
+              >
+                <RotateCcw className="size-4" />
+                Try again
+              </Button>
+            }
+          />
+        </Panel>
+      )}
+
+      {isLoading && !error && (
         <div className="flex items-center justify-center py-24">
           <Spinner className="size-5" />
         </div>

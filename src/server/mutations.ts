@@ -607,8 +607,8 @@ export async function deleteAccount(rowId: string) {
  * Live balance = opening balance, minus everything spent from the account,
  * plus refunds and money received, since the opening date.
  */
-export async function computeAccountBalances() {
-  const userId = await requireUserId();
+export async function computeAccountBalances(authenticatedUserId?: string) {
+  const userId = authenticatedUserId ?? await requireUserId();
   const all = await db.select().from(accounts);
   return Promise.all(all.map(async (account) => {
     const [[spentRow], [refundedRow], [sentRow], [receivedRow]] = await Promise.all([

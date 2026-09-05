@@ -207,8 +207,9 @@ export async function recomputeAll(year?: number) {
 export async function capLedgerFor(
   instrumentId: string,
   year: number,
+  authenticatedUserId?: string,
 ): Promise<{ ledger: CapLedger; inst: EngineInstrument; rules: EngineRule[] } | null> {
-  const userId = await requireUserId();
+  const userId = authenticatedUserId ?? await requireUserId();
   const [inst] = await db
     .select()
     .from(instruments)
@@ -253,8 +254,13 @@ export async function capLedgerFor(
 export async function capsForInstrument(
   instrumentId: string,
   dateISO: string,
+  authenticatedUserId?: string,
 ): Promise<CapStatus[]> {
-  const built = await capLedgerFor(instrumentId, Number(dateISO.slice(0, 4)));
+  const built = await capLedgerFor(
+    instrumentId,
+    Number(dateISO.slice(0, 4)),
+    authenticatedUserId,
+  );
   if (!built) return [];
   return capStatusFor(built.inst, built.rules, built.ledger, dateISO);
 }

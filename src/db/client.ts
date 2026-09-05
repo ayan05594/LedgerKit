@@ -26,7 +26,9 @@ export const sql =
   globalForDb.__ledgerkitSql ??
   postgres(databaseUrl, {
     prepare: false,
-    max: 1,
+    // Summary screens intentionally run independent reads in parallel. A tiny
+    // pool avoids serialising dozens of round trips behind one connection.
+    max: 3,
     idle_timeout: 20,
     connect_timeout: 10,
   });
