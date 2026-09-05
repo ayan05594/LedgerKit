@@ -35,10 +35,23 @@ import {
   Switch,
 } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
+import { DataLoadError } from "@/components/ui/data-load-error";
 
 export default function PeoplePage() {
-  const { data: balances, isLoading } = usePeople();
-  const { data: transfers } = useTransfers();
+  const {
+    data: balances,
+    error,
+    isLoading,
+    isFetching,
+    refetch,
+  } = usePeople();
+  const {
+    data: transfers,
+    error: transfersError,
+    isLoading: transfersLoading,
+    isFetching: transfersFetching,
+    refetch: refetchTransfers,
+  } = useTransfers();
   const [transferOpen, setTransferOpen] = React.useState(false);
   const [personOpen, setPersonOpen] = React.useState(false);
   const [prefillPerson, setPrefillPerson] = React.useState<string | null>(null);
@@ -96,7 +109,16 @@ export default function PeoplePage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {error ? (
+        <Panel>
+          <DataLoadError
+            title="People could not be loaded"
+            error={error}
+            onRetry={refetch}
+            isRetrying={isFetching}
+          />
+        </Panel>
+      ) : isLoading ? (
         <div className="flex justify-center py-16">
           <Spinner className="size-5" />
         </div>
@@ -129,7 +151,18 @@ export default function PeoplePage() {
       )}
 
       <Panel title="Transfer log" bodyClassName="p-0">
-        {!transfers || transfers.length === 0 ? (
+        {transfersError ? (
+          <DataLoadError
+            title="Transfers could not be loaded"
+            error={transfersError}
+            onRetry={refetchTransfers}
+            isRetrying={transfersFetching}
+          />
+        ) : transfersLoading ? (
+          <div className="flex justify-center py-12">
+            <Spinner className="size-5" />
+          </div>
+        ) : !transfers || transfers.length === 0 ? (
           <EmptyState
             icon={<ArrowUpRight className="size-5" />}
             title="No transfers recorded"

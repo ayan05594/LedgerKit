@@ -6,8 +6,10 @@ import {
   Globe,
   Landmark,
   QrCode,
+  RefreshCw,
   Store,
   Trash2,
+  TriangleAlert,
 } from "lucide-react";
 import type { Adjustment } from "@/db/schema";
 import { formatMoney, toPaise } from "@/lib/money";
@@ -120,7 +122,13 @@ export function ExpenseSheet({
   expenseId?: string | null;
 }) {
   const editing = !!expenseId;
-  const { data: reference } = useReference();
+  const {
+    data: reference,
+    error: referenceError,
+    isLoading: referenceLoading,
+    isFetching: referenceFetching,
+    refetch: refetchReference,
+  } = useReference();
   const { data: existing } = useExpense(open && expenseId ? expenseId : null);
 
   const [form, setForm] = React.useState<FormState>(blank);
@@ -442,6 +450,37 @@ export function ExpenseSheet({
       }
     >
       <div className="space-y-5">
+        {referenceError && (
+          <div
+            role="alert"
+            className="flex items-start gap-3 rounded-[10px] border border-alert/25 bg-alert-soft px-3 py-3 text-alert"
+          >
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[0.8125rem] font-medium">
+                Cards and categories could not be loaded
+              </p>
+              <p className="mt-0.5 text-[0.75rem]">
+                {referenceError.message}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={referenceFetching}
+              onClick={() => void refetchReference()}
+            >
+              <RefreshCw className="size-3.5" />
+              Retry
+            </Button>
+          </div>
+        )}
+        {referenceLoading && !referenceError && (
+          <p className="rounded-[9px] border border-rule bg-sunken px-3 py-2 text-[0.8125rem] text-ink-2">
+            Loading your cards and categories...
+          </p>
+        )}
+
         {error && (
           <p className="rounded-[9px] border border-alert/25 bg-alert-soft px-3 py-2 text-[0.8125rem] text-alert">
             {error}

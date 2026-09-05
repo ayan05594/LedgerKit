@@ -610,56 +610,84 @@ export async function deleteAccount(rowId: string) {
 export async function computeAccountBalances(authenticatedUserId?: string) {
   const userId = authenticatedUserId ?? await requireUserId();
   const all = await db.select().from(accounts);
-  return Promise.all(all.map(async (account) => {
-    const [[spentRow], [refundedRow], [sentRow], [receivedRow]] = await Promise.all([
-      db
-        .select({ v: sql<string>`coalesce(sum(${expenses.amountPaise}), 0)` })
-        .from(expenses)
-        .where(
-          and(
-            eq(expenses.userId, userId),
-            eq(expenses.accountId, account.id),
-            gte(expenses.occurredAt, account.openingDate),
-          ),
+  if (!all.length) return [];
+
+  // Aggregate once per transaction type instead of issuing four queries for
+  // every account. This keeps the reference screen fast on Supabase's nano DB.
+  const [spentRows, refundedRows, sentRows, receivedRows] = await Promise.all([
+    db
+      .select({
+        accountId: expenses.accountId,
+        v: sql<string>`coalesce(sum(${expenses.amountPaise}), 0)`,
+      })
+      .from(expenses)
+      .innerJoin(accounts, eq(expenses.accountId, accounts.id))
+      .where(
+        and(
+          eq(expenses.userId, userId),
+          gte(expenses.occurredAt, accounts.openingDate),
         ),
-      db
-        .select({ v: sql<string>`coalesce(sum(${refunds.amountPaise}), 0)` })
-        .from(refunds)
-        .where(
-          and(
-            eq(refunds.userId, userId),
-            eq(refunds.toAccountId, account.id),
-            eq(refunds.status, "received"),
-            gte(refunds.refundedAt, account.openingDate),
-          ),
+      )
+      .groupBy(expenses.accountId),
+    db
+      .select({
+        accountId: refunds.toAccountId,
+        v: sql<string>`coalesce(sum(${refunds.amountPaise}), 0)`,
+      })
+      .from(refunds)
+      .innerJoin(accounts, eq(refunds.toAccountId, accounts.id))
+      .where(
+        and(
+          eq(refunds.userId, userId),
+          eq(refunds.status, "received"),
+          gte(refunds.refundedAt, accounts.openingDate),
         ),
-      db
-        .select({ v: sql<string>`coalesce(sum(${transfers.amountPaise}), 0)` })
-        .from(transfers)
-        .where(
-          and(
-            eq(transfers.userId, userId),
-            eq(transfers.accountId, account.id),
-            eq(transfers.direction, "sent"),
-            gte(transfers.occurredAt, account.openingDate),
-          ),
+      )
+      .groupBy(refunds.toAccountId),
+    db
+      .select({
+        accountId: transfers.accountId,
+        v: sql<string>`coalesce(sum(${transfers.amountPaise}), 0)`,
+      })
+      .from(transfers)
+      .innerJoin(accounts, eq(transfers.accountId, accounts.id))
+      .where(
+        and(
+          eq(transfers.userId, userId),
+          eq(transfers.direction, "sent"),
+          gte(transfers.occurredAt, accounts.openingDate),
         ),
-      db
-        .select({ v: sql<string>`coalesce(sum(${transfers.amountPaise}), 0)` })
-        .from(transfers)
-        .where(
-          and(
-            eq(transfers.userId, userId),
-            eq(transfers.accountId, account.id),
-            eq(transfers.direction, "received"),
-            gte(transfers.occurredAt, account.openingDate),
-          ),
+      )
+      .groupBy(transfers.accountId),
+    db
+      .select({
+        accountId: transfers.accountId,
+        v: sql<string>`coalesce(sum(${transfers.amountPaise}), 0)`,
+      })
+      .from(transfers)
+      .innerJoin(accounts, eq(transfers.accountId, accounts.id))
+      .where(
+        and(
+          eq(transfers.userId, userId),
+          eq(transfers.direction, "received"),
+          gte(transfers.occurredAt, accounts.openingDate),
         ),
-    ]);
-    const spent = Number(spentRow?.v ?? 0);
-    const refunded = Number(refundedRow?.v ?? 0);
-    const sent = Number(sentRow?.v ?? 0);
-    const received = Number(receivedRow?.v ?? 0);
+      )
+      .groupBy(transfers.accountId),
+  ]);
+
+  const values = (rows: { accountId: string | null; v: string }[]) =>
+    new Map(rows.map((row) => [row.accountId, Number(row.v)]));
+  const spentBy = values(spentRows);
+  const refundedBy = values(refundedRows);
+  const sentBy = values(sentRows);
+  const receivedBy = values(receivedRows);
+
+  return all.map((account) => {
+    const spent = spentBy.get(account.id) ?? 0;
+    const refunded = refundedBy.get(account.id) ?? 0;
+    const sent = sentBy.get(account.id) ?? 0;
+    const received = receivedBy.get(account.id) ?? 0;
 
     const balancePaise =
       account.openingBalancePaise - spent + refunded - sent + received;
@@ -671,7 +699,7 @@ export async function computeAccountBalances(authenticatedUserId?: string) {
       sentPaise: sent,
       receivedPaise: received,
     };
-  }));
+  });
 }
 
 /* ---------------------------------------------------------------- people */

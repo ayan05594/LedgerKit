@@ -23,9 +23,16 @@ import {
   Spinner,
 } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
+import { DataLoadError } from "@/components/ui/data-load-error";
 
 export default function AccountsPage() {
-  const { data: reference, isLoading } = useReference();
+  const {
+    data: reference,
+    error,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useReference();
   const [editing, setEditing] = React.useState<AccountBalance | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState(false);
 
@@ -70,7 +77,16 @@ export default function AccountsPage() {
         </p>
       </div>
 
-      {isLoading ? (
+      {error ? (
+        <Panel>
+          <DataLoadError
+            title="Accounts could not be loaded"
+            error={error}
+            onRetry={refetch}
+            isRetrying={isFetching}
+          />
+        </Panel>
+      ) : isLoading ? (
         <div className="flex justify-center py-20">
           <Spinner className="size-5" />
         </div>

@@ -45,6 +45,7 @@ import {
   Textarea,
   Tooltip,
 } from "@/components/ui/primitives";
+import { DataLoadError } from "@/components/ui/data-load-error";
 
 const PERIOD_WORD = {
   month: "mo",
@@ -60,7 +61,13 @@ export default function CardDetailPage() {
   const now = new Date();
   const year = now.getFullYear();
 
-  const { data, isLoading } = useInstrument(id, year);
+  const {
+    data,
+    error,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useInstrument(id, year);
   const { data: summaryData } = useSummary(year, now.getMonth() + 1);
   const { data: reference } = useReference();
   const updateInstrument = useUpdateInstrument();
@@ -69,6 +76,19 @@ export default function CardDetailPage() {
   const [editingRule, setEditingRule] = React.useState<RewardRule | null>(null);
   const [ruleDialogOpen, setRuleDialogOpen] = React.useState(false);
   const reduce = useReducedMotion();
+
+  if (error) {
+    return (
+      <Panel>
+        <DataLoadError
+          title="Card details could not be loaded"
+          error={error}
+          onRetry={refetch}
+          isRetrying={isFetching}
+        />
+      </Panel>
+    );
+  }
 
   if (isLoading || !data) {
     return (

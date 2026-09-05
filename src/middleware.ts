@@ -9,6 +9,7 @@ const AUTH_PAGES = new Set(["/login", "/register"]);
 const PUBLIC_API = new Set([
   "/api/auth/login",
   "/api/auth/register",
+  "/api/health",
 ]);
 
 export async function middleware(request: NextRequest) {

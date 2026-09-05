@@ -22,9 +22,10 @@ import {
   Spinner,
 } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
+import { DataLoadError } from "@/components/ui/data-load-error";
 
 export default function PendingPage() {
-  const { data, isLoading } = usePending();
+  const { data, error, isLoading, isFetching, refetch } = usePending();
   const sheet = useExpenseSheet();
   const [settling, setSettling] = React.useState<ExpenseRow | null>(null);
 
@@ -63,7 +64,16 @@ export default function PendingPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {error ? (
+        <Panel>
+          <DataLoadError
+            title="Money owed could not be loaded"
+            error={error}
+            onRetry={refetch}
+            isRetrying={isFetching}
+          />
+        </Panel>
+      ) : isLoading ? (
         <div className="flex justify-center py-16">
           <Spinner className="size-5" />
         </div>

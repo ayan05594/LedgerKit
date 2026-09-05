@@ -442,17 +442,21 @@ export interface PersonBalance {
   transferCount: number;
 }
 
-export async function getPeopleBalances(): Promise<PersonBalance[]> {
-  const userId = await requireUserId();
-  const allPeople = await db
-    .select()
-    .from(people)
-    .where(eq(people.archived, false))
-    .orderBy(asc(people.name));
-  const allTransfers = await db
-    .select()
-    .from(transfers)
-    .where(eq(transfers.userId, userId));
+export async function getPeopleBalances(
+  authenticatedUserId?: string,
+): Promise<PersonBalance[]> {
+  const userId = authenticatedUserId ?? await requireUserId();
+  const [allPeople, allTransfers] = await Promise.all([
+    db
+      .select()
+      .from(people)
+      .where(eq(people.archived, false))
+      .orderBy(asc(people.name)),
+    db
+      .select()
+      .from(transfers)
+      .where(eq(transfers.userId, userId)),
+  ]);
 
   return allPeople.map((person) => {
     const mine = allTransfers.filter((t) => t.personId === person.id);
@@ -483,19 +487,24 @@ export async function getPeopleBalances(): Promise<PersonBalance[]> {
   });
 }
 
-export async function listTransfers(limit = 200): Promise<(Transfer & {
+export async function listTransfers(
+  limit = 200,
+  authenticatedUserId?: string,
+): Promise<(Transfer & {
   personName: string;
   personColor: string;
 })[]> {
-  const userId = await requireUserId();
-  const peopleRows = await db.select().from(people);
+  const userId = authenticatedUserId ?? await requireUserId();
+  const [peopleRows, rows] = await Promise.all([
+    db.select().from(people),
+    db
+      .select()
+      .from(transfers)
+      .where(eq(transfers.userId, userId))
+      .orderBy(desc(transfers.occurredAt), desc(transfers.createdAt))
+      .limit(limit),
+  ]);
   const peopleMap = new Map(peopleRows.map((p) => [p.id, p]));
-  const rows = await db
-    .select()
-    .from(transfers)
-    .where(eq(transfers.userId, userId))
-    .orderBy(desc(transfers.occurredAt), desc(transfers.createdAt))
-    .limit(limit);
   return rows.map((t) => ({
       ...t,
       personName: (t.personId && peopleMap.get(t.personId)?.name) || "Someone",
@@ -515,8 +524,8 @@ export interface PendingSummary {
 
 export async function getPending(): Promise<PendingSummary> {
   const userId = await requireUserId();
-  const reimbursementRows = await hydrate(
-    await db
+  const [reimbursementExpenses, pendingRefundRows, balances] = await Promise.all([
+    db
       .select()
       .from(expenses)
       .where(
@@ -527,14 +536,14 @@ export async function getPending(): Promise<PendingSummary> {
         ),
       )
       .orderBy(asc(expenses.reimbursementDueDate), desc(expenses.occurredAt)),
-    userId,
-  );
-
-  const pendingRefundIds = (await db
-    .select({ id: refunds.expenseId })
-    .from(refunds)
-    .where(and(eq(refunds.userId, userId), eq(refunds.status, "pending"))))
-    .map((r) => r.id);
+    db
+      .select({ id: refunds.expenseId })
+      .from(refunds)
+      .where(and(eq(refunds.userId, userId), eq(refunds.status, "pending"))),
+    getPeopleBalances(userId),
+  ]);
+  const reimbursementRows = await hydrate(reimbursementExpenses, userId);
+  const pendingRefundIds = pendingRefundRows.map((r) => r.id);
   const refundRows = pendingRefundIds.length
     ? await hydrate(
         await db
@@ -549,8 +558,6 @@ export async function getPending(): Promise<PendingSummary> {
         userId,
       )
     : [];
-
-  const balances = await getPeopleBalances();
 
   return {
     reimbursements: reimbursementRows,

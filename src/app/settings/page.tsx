@@ -21,9 +21,16 @@ import {
   Select,
   Spinner,
 } from "@/components/ui/primitives";
+import { DataLoadError } from "@/components/ui/data-load-error";
 
 export default function SettingsPage() {
-  const { data: reference, isLoading } = useReference();
+  const {
+    data: reference,
+    error,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useReference();
   const loadDemo = useLoadDemo();
   const clearTransactions = useClearTransactions();
   const createCategory = useCreateCategory();
@@ -33,6 +40,19 @@ export default function SettingsPage() {
   const [categoryOpen, setCategoryOpen] = React.useState(false);
   const [merchantOpen, setMerchantOpen] = React.useState(false);
   const [appOpen, setAppOpen] = React.useState(false);
+
+  if (error) {
+    return (
+      <Panel>
+        <DataLoadError
+          title="Settings could not be loaded"
+          error={error}
+          onRetry={refetch}
+          isRetrying={isFetching}
+        />
+      </Panel>
+    );
+  }
 
   if (isLoading || !reference) {
     return (

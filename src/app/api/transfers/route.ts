@@ -2,11 +2,15 @@ import { listTransfers } from "@/server/queries";
 import { createTransfer } from "@/server/mutations";
 import { handle, fail } from "@/lib/api";
 import { transferSchema } from "@/lib/validation";
+import { requireUserId } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return handle(() => listTransfers());
+  return handle(async () => {
+    const userId = await requireUserId();
+    return listTransfers(200, userId);
+  });
 }
 
 export async function POST(request: Request) {
