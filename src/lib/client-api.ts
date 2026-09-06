@@ -38,19 +38,31 @@ async function request<T>(
 
   let response: Response;
   try {
-    response = await fetch(url, {
-      ...rest,
-      signal: controller.signal,
-      headers: json ? { "Content-Type": "application/json" } : undefined,
-      body: json ? JSON.stringify(json) : rest.body,
-    });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(
-        "The server took too long to respond. Please try again in a moment.",
-      );
+    const method = rest.method?.toUpperCase() ?? "GET";
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        response = await fetch(url, {
+          ...rest,
+          signal: controller.signal,
+          headers: json ? { "Content-Type": "application/json" } : undefined,
+          body: json ? JSON.stringify(json) : rest.body,
+        });
+        break;
+      } catch (error) {
+        if (controller.signal.aborted) {
+          throw new Error(
+            "The server took too long to respond. Please try again in a moment.",
+          );
+        }
+        // A short DNS/Wi-Fi interruption should not replace the page with an
+        // error. Reads are safe to retry once; writes are never repeated.
+        if (method === "GET" && attempt === 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, 400));
+          continue;
+        }
+        throw error;
+      }
     }
-    throw error;
   } finally {
     window.clearTimeout(timeout);
     rest.signal?.removeEventListener("abort", abort);
