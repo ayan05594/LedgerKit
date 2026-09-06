@@ -41,7 +41,7 @@ function isTransientDatabaseError(error: unknown) {
   const messages: string[] = [];
   let current: unknown = error;
   for (let depth = 0; current && depth < 4; depth += 1) {
-    if (current instanceof Error) messages.push(current.message);
+    if (current instanceof Error) messages.push(current.name, current.message);
     else if (typeof current === "object") {
       const value = current as { message?: unknown; code?: unknown };
       if (typeof value.message === "string") messages.push(value.message);
