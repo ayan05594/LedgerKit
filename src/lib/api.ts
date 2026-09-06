@@ -59,20 +59,23 @@ function isTransientDatabaseError(error: unknown) {
 }
 
 // Safe database reads get one invisible retry with a fresh connection pool.
-export async function handleRead<T>(fn: () => T | Promise<T>) {
+export async function runDatabaseRead<T>(fn: () => T | Promise<T>) {
   try {
     await prepareDatabaseRead();
-    return ok(await fn());
+    return await fn();
   } catch (error) {
     if (isTransientDatabaseError(error)) {
-      try {
-        await prepareDatabaseRead(true);
-        return ok(await fn());
-      } catch (retryError) {
-        error = retryError;
-      }
+      await prepareDatabaseRead(true);
+      return await fn();
     }
+    throw error;
+  }
+}
 
+export async function handleRead<T>(fn: () => T | Promise<T>) {
+  try {
+    return ok(await runDatabaseRead(fn));
+  } catch (error) {
     return errorResponse(error);
   }
 }
