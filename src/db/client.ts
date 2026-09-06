@@ -22,11 +22,12 @@ if (!databaseUrl) {
 function createSqlClient() {
   return postgres(databaseUrl!, {
     prepare: false,
-    // Summary screens intentionally run independent reads in parallel. A tiny
-    // pool avoids serialising dozens of round trips behind one connection.
-    max: 5,
-    idle_timeout: 10,
-    connect_timeout: 5,
+    // Each Vercel route can have many warm instances. One connection per
+    // instance prevents a cold page from opening a burst of pooler sockets.
+    max: 1,
+    idle_timeout: 5,
+    connect_timeout: 3,
+    max_lifetime: 30,
     keep_alive: 5,
   });
 }

@@ -53,20 +53,33 @@ function isTransientDatabaseError(error: unknown) {
         : undefined;
   }
 
-  return /CONNECT_TIMEOUT|CONNECTION_DESTROYED|ECONNRESET|ENOTFOUND|ETIMEDOUT|socket|connection terminated/i.test(
+  return /DatabaseReadTimeout|CONNECT_TIMEOUT|CONNECTION_DESTROYED|ECONNRESET|ENOTFOUND|ETIMEDOUT|socket|connection terminated/i.test(
     messages.join(" "),
   );
+}
+
+function readWithTimeout<T>(fn: () => T | Promise<T>) {
+  let timeout: ReturnType<typeof setTimeout>;
+  const operation = Promise.resolve().then(fn);
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      const error = new Error("Database read timed out");
+      error.name = "DatabaseReadTimeout";
+      reject(error);
+    }, 5_500);
+  });
+  return Promise.race([operation, deadline]).finally(() => clearTimeout(timeout));
 }
 
 // Safe database reads get one invisible retry with a fresh connection pool.
 export async function runDatabaseRead<T>(fn: () => T | Promise<T>) {
   try {
     await prepareDatabaseRead();
-    return await fn();
+    return await readWithTimeout(fn);
   } catch (error) {
     if (isTransientDatabaseError(error)) {
       await prepareDatabaseRead(true);
-      return await fn();
+      return await readWithTimeout(fn);
     }
     throw error;
   }
