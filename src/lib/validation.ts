@@ -49,6 +49,35 @@ export const expenseSchema = z
 // throws while constructing that schema, before an API response can be made).
 export const expenseEditSchema = expenseSchema;
 
+export const standaloneReimbursementKinds = [
+  "fuel",
+  "travel",
+  "meals",
+  "phone_internet",
+  "medical",
+  "allowance",
+  "other",
+] as const;
+
+export const standaloneReimbursementSchema = z.object({
+  title: z.string().trim().min(1, "Say what the reimbursement is for").max(120),
+  source: z.string().trim().min(1, "Enter who will pay you").max(160),
+  kind: z.enum(standaloneReimbursementKinds),
+  expectedPaise: z.number().int().positive("Amount has to be more than zero"),
+  claimedAt: isoDate,
+  dueDate: isoDate.nullable().optional(),
+  notes: z.string().trim().max(500).optional(),
+});
+
+export const standaloneReimbursementReceiptSchema = z.object({
+  amountPaise: z
+    .number()
+    .int("Amount must be a whole number of paise")
+    .positive("Amount has to be more than zero"),
+  receivedAt: isoDate,
+  note: z.string().trim().max(300).optional(),
+});
+
 export const adjustmentSchema = z.object({
   label: z.string().min(1, "Give this discount a name").max(120),
   kind: z
@@ -102,3 +131,6 @@ export const previewSchema = z.object({
 });
 
 export type ExpenseFormValues = z.input<typeof expenseSchema>;
+export type StandaloneReimbursementFormValues = z.input<
+  typeof standaloneReimbursementSchema
+>;

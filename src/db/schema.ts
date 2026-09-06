@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, boolean, index, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /**
@@ -342,6 +342,69 @@ export const refunds = pgTable(
   ],
 );
 
+/* ----------------------------------------------- standalone reimbursements */
+/**
+ * Money expected back that is not tied to a LedgerKit expense, such as a
+ * company fuel allowance, travel claim, or phone reimbursement.
+ */
+export const standaloneReimbursements = pgTable(
+  "standalone_reimbursements",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    title: text("title").notNull(),
+    source: text("source").notNull().default(""),
+    kind: text("kind", {
+      enum: [
+        "fuel",
+        "travel",
+        "meals",
+        "phone_internet",
+        "medical",
+        "allowance",
+        "other",
+      ],
+    })
+      .notNull()
+      .default("other"),
+    expectedPaise: integer("expected_paise").notNull(),
+    claimedAt: text("claimed_at").notNull(),
+    dueDate: text("due_date"),
+    writtenOff: boolean("written_off").notNull().default(false),
+    notes: text("notes").notNull().default(""),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("standalone_reimbursement_user_idx").on(t.userId),
+    index("standalone_reimbursement_due_idx").on(t.userId, t.dueDate),
+    check(
+      "standalone_reimbursement_expected_positive",
+      sql`${t.expectedPaise} > 0`,
+    ),
+  ],
+);
+
+export const standaloneReimbursementReceipts = pgTable(
+  "standalone_reimbursement_receipts",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    reimbursementId: text("reimbursement_id")
+      .notNull()
+      .references(() => standaloneReimbursements.id, { onDelete: "cascade" }),
+    amountPaise: integer("amount_paise").notNull(),
+    receivedAt: text("received_at").notNull(),
+    note: text("note").notNull().default(""),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("standalone_receipt_user_idx").on(t.userId),
+    index("standalone_receipt_reimbursement_idx").on(t.reimbursementId),
+    check("standalone_receipt_amount_positive", sql`${t.amountPaise} > 0`),
+  ],
+);
+
 /* ---------------------------------------------------------- people & p2p */
 
 export const people = pgTable(
@@ -417,5 +480,9 @@ export type PaymentApp = typeof paymentApps.$inferSelect;
 export type Expense = typeof expenses.$inferSelect;
 export type Adjustment = typeof adjustments.$inferSelect;
 export type Refund = typeof refunds.$inferSelect;
+export type StandaloneReimbursement =
+  typeof standaloneReimbursements.$inferSelect;
+export type StandaloneReimbursementReceipt =
+  typeof standaloneReimbursementReceipts.$inferSelect;
 export type Person = typeof people.$inferSelect;
 export type Transfer = typeof transfers.$inferSelect;

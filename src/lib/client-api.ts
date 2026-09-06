@@ -23,6 +23,7 @@ import type {
   MonthSummary,
   PendingSummary,
   PersonBalance,
+  StandaloneReimbursementRow as ServerStandaloneReimbursementRow,
 } from "@/server/queries";
 import type { RewardOutcome, CapStatus } from "@/lib/rewards/engine";
 
@@ -132,6 +133,8 @@ export type RewardPreview = RewardOutcome & {
 };
 
 export type TransferRow = Transfer & { personName: string; personColor: string };
+
+export type StandaloneReimbursementRow = ServerStandaloneReimbursementRow;
 
 /* ---------------------------------------------------------------- queries */
 
@@ -321,6 +324,40 @@ export function useRecordReimbursement() {
     ({ id, ...json }: { id: string } & Record<string, unknown>) =>
       request(`/api/expenses/${id}/reimbursement`, { method: "POST", json }),
     "Reimbursement recorded",
+  );
+}
+
+export function useCreateStandaloneReimbursement() {
+  return useWrite(
+    (json: Record<string, unknown>) =>
+      request<{ id: string }>("/api/reimbursements", { method: "POST", json }),
+    "Reimbursement added",
+  );
+}
+
+export function useUpdateStandaloneReimbursement() {
+  return useWrite(
+    ({ id, ...json }: { id: string } & Record<string, unknown>) =>
+      request<{ id: string }>(`/api/reimbursements/${id}`, {
+        method: "PATCH",
+        json,
+      }),
+    "Reimbursement updated",
+  );
+}
+
+export function useDeleteStandaloneReimbursement() {
+  return useWrite(
+    (id: string) => request(`/api/reimbursements/${id}`, { method: "DELETE" }),
+    "Reimbursement deleted",
+  );
+}
+
+export function useRecordStandaloneReimbursementReceipt() {
+  return useWrite(
+    ({ id, ...json }: { id: string } & Record<string, unknown>) =>
+      request(`/api/reimbursements/${id}/receipts`, { method: "POST", json }),
+    "Payment recorded",
   );
 }
 

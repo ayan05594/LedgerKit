@@ -10,6 +10,8 @@ import type {
   Person,
   Refund,
   RewardRule,
+  StandaloneReimbursement,
+  StandaloneReimbursementReceipt,
   Transfer,
 } from "@/db/schema";
 import { computeExpenseMath, sumMath, type ExpenseMath } from "@/lib/derive";
@@ -17,6 +19,10 @@ import { monthBounds } from "@/lib/rewards/periods";
 import { capsForInstruments } from "@/lib/rewards/recompute";
 import type { CapStatus } from "@/lib/rewards/engine";
 import { requireUserId } from "@/lib/auth";
+import {
+  deriveStandaloneReimbursementState,
+  type StandaloneReimbursementStatus,
+} from "@/lib/reimbursements";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fromSupabaseRows } from "@/lib/supabase/rows";
 
@@ -575,16 +581,108 @@ export async function listTransfers(
 
 export interface PendingSummary {
   reimbursements: ExpenseRow[];
+  standaloneReimbursements: StandaloneReimbursementRow[];
   refunds: ExpenseRow[];
   reimbursementOutstandingPaise: number;
+  standaloneReimbursementOutstandingPaise: number;
   refundPendingPaise: number;
   lendingOutstandingPaise: number;
+}
+
+export interface StandaloneReimbursementRow {
+  reimbursement: StandaloneReimbursement;
+  receipts: StandaloneReimbursementReceipt[];
+  receivedPaise: number;
+  outstandingPaise: number;
+  status: StandaloneReimbursementStatus;
+}
+
+function hydrateStandaloneReimbursements(
+  claims: StandaloneReimbursement[],
+  receipts: StandaloneReimbursementReceipt[],
+): StandaloneReimbursementRow[] {
+  const receiptsByClaim = new Map<string, StandaloneReimbursementReceipt[]>();
+  for (const receipt of receipts) {
+    const rows = receiptsByClaim.get(receipt.reimbursementId) ?? [];
+    rows.push(receipt);
+    receiptsByClaim.set(receipt.reimbursementId, rows);
+  }
+
+  return claims.map((reimbursement) => {
+    const claimReceipts = receiptsByClaim.get(reimbursement.id) ?? [];
+    return {
+      reimbursement,
+      receipts: claimReceipts,
+      ...deriveStandaloneReimbursementState(reimbursement, claimReceipts),
+    };
+  });
+}
+
+export async function listStandaloneReimbursements(
+  authenticatedUserId?: string,
+): Promise<StandaloneReimbursementRow[]> {
+  const userId = authenticatedUserId ?? await requireUserId();
+  const admin = createSupabaseAdminClient();
+  const [claimResult, receiptResult] = await Promise.all([
+    admin
+      .from("standalone_reimbursements")
+      .select("*")
+      .eq("user_id", userId)
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .order("claimed_at", { ascending: false })
+      .order("created_at", { ascending: false }),
+    admin
+      .from("standalone_reimbursement_receipts")
+      .select("*")
+      .eq("user_id", userId)
+      .order("received_at", { ascending: false })
+      .order("created_at", { ascending: false }),
+  ]);
+  if (claimResult.error) throw claimResult.error;
+  if (receiptResult.error) throw receiptResult.error;
+
+  return hydrateStandaloneReimbursements(
+    fromSupabaseRows<StandaloneReimbursement>(claimResult.data),
+    fromSupabaseRows<StandaloneReimbursementReceipt>(receiptResult.data),
+  );
+}
+
+export async function getStandaloneReimbursement(
+  rowId: string,
+): Promise<StandaloneReimbursementRow | null> {
+  const userId = await requireUserId();
+  const admin = createSupabaseAdminClient();
+  const [claimResult, receiptResult] = await Promise.all([
+    admin
+      .from("standalone_reimbursements")
+      .select("*")
+      .eq("id", rowId)
+      .eq("user_id", userId)
+      .limit(1),
+    admin
+      .from("standalone_reimbursement_receipts")
+      .select("*")
+      .eq("reimbursement_id", rowId)
+      .eq("user_id", userId)
+      .order("received_at", { ascending: false })
+      .order("created_at", { ascending: false }),
+  ]);
+  if (claimResult.error) throw claimResult.error;
+  if (receiptResult.error) throw receiptResult.error;
+  const [claim] = fromSupabaseRows<StandaloneReimbursement>(claimResult.data);
+  if (!claim) return null;
+
+  return hydrateStandaloneReimbursements(
+    [claim],
+    fromSupabaseRows<StandaloneReimbursementReceipt>(receiptResult.data),
+  )[0] ?? null;
 }
 
 export async function getPending(): Promise<PendingSummary> {
   const userId = await requireUserId();
   const admin = createSupabaseAdminClient();
-  const [expenseResult, refundResult, balances] = await Promise.all([
+  const [expenseResult, refundResult, balances, allStandaloneReimbursements] =
+    await Promise.all([
     admin
       .from("expenses")
       .select("*")
@@ -599,6 +697,7 @@ export async function getPending(): Promise<PendingSummary> {
       .eq("user_id", userId)
       .eq("status", "pending"),
     getPeopleBalances(userId),
+    listStandaloneReimbursements(userId),
   ]);
   if (expenseResult.error) throw expenseResult.error;
   if (refundResult.error) throw refundResult.error;
@@ -622,9 +721,14 @@ export async function getPending(): Promise<PendingSummary> {
 
   return {
     reimbursements: reimbursementRows,
+    standaloneReimbursements: allStandaloneReimbursements,
     refunds: refundRows,
     reimbursementOutstandingPaise: reimbursementRows.reduce(
       (s, r) => s + r.math.reimbursementOutstandingPaise,
+      0,
+    ),
+    standaloneReimbursementOutstandingPaise: allStandaloneReimbursements.reduce(
+      (sum, row) => sum + row.outstandingPaise,
       0,
     ),
     refundPendingPaise: refundRows.reduce((s, r) => s + r.math.refundPendingPaise, 0),

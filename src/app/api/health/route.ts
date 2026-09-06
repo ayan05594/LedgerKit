@@ -8,17 +8,27 @@ export async function GET() {
   const startedAt = Date.now();
   try {
     const admin = createSupabaseAdminClient();
-    const [categoryResult, instrumentResult, expenseResult, seedResult] =
+    const [
+      categoryResult,
+      instrumentResult,
+      expenseResult,
+      reimbursementResult,
+      seedResult,
+    ] =
       await Promise.all([
         admin.from("categories").select("id", { count: "exact", head: true }),
         admin.from("instruments").select("id", { count: "exact", head: true }),
         admin.from("expenses").select("id", { count: "exact", head: true }),
+        admin
+          .from("standalone_reimbursements")
+          .select("id", { count: "exact", head: true }),
         admin.from("settings").select("key").eq("key", "seeded_at").limit(1),
       ]);
     const error =
       categoryResult.error ??
       instrumentResult.error ??
       expenseResult.error ??
+      reimbursementResult.error ??
       seedResult.error;
     if (error) throw error;
 
@@ -33,6 +43,7 @@ export async function GET() {
         categories: categoryResult.count ?? 0,
         cards: instrumentResult.count ?? 0,
         expenses: expenseResult.count ?? 0,
+        standaloneReimbursements: reimbursementResult.count ?? 0,
       },
       responseTimeMs: Date.now() - startedAt,
     });

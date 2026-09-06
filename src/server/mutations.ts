@@ -14,11 +14,15 @@ import {
   refunds,
   rewardRules,
   settings,
+  standaloneReimbursementReceipts,
+  standaloneReimbursements,
   transfers,
 } from "@/db/schema";
 import { recomputeForDate, recomputeInstrumentYear } from "@/lib/rewards/recompute";
 import { todayISO } from "@/lib/rewards/periods";
 import { requireUserId } from "@/lib/auth";
+import { ApiError } from "@/lib/api";
+import { deriveStandaloneReimbursementState } from "@/lib/reimbursements";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fromSupabaseRows, toSupabaseRow } from "@/lib/supabase/rows";
 
@@ -446,6 +450,183 @@ export async function writeOffReimbursement(expenseId: string) {
     .set({ reimbursementStatus: "written_off", updatedAt: stamp() })
     .where(and(eq(expenses.id, expenseId), eq(expenses.userId, userId)));
   return true;
+}
+
+/* ----------------------------------------------- standalone reimbursements */
+
+export interface StandaloneReimbursementInput {
+  title: string;
+  source: string;
+  kind:
+    | "fuel"
+    | "travel"
+    | "meals"
+    | "phone_internet"
+    | "medical"
+    | "allowance"
+    | "other";
+  expectedPaise: number;
+  claimedAt: string;
+  dueDate?: string | null;
+  notes?: string;
+}
+
+export interface StandaloneReimbursementReceiptInput {
+  amountPaise: number;
+  receivedAt: string;
+  note?: string;
+}
+
+export async function createStandaloneReimbursement(
+  input: StandaloneReimbursementInput,
+) {
+  const userId = await requireUserId();
+  const rowId = id("sre");
+  const result = await createSupabaseAdminClient()
+    .from("standalone_reimbursements")
+    .insert(
+      toSupabaseRow({
+        id: rowId,
+        userId,
+        title: input.title,
+        source: input.source,
+        kind: input.kind,
+        expectedPaise: input.expectedPaise,
+        claimedAt: input.claimedAt,
+        dueDate: input.dueDate ?? null,
+        writtenOff: false,
+        notes: input.notes ?? "",
+        createdAt: stamp(),
+        updatedAt: stamp(),
+      }),
+    );
+  if (result.error) throw result.error;
+  return rowId;
+}
+
+async function standaloneClaimAndReceipts(rowId: string, userId: string) {
+  const admin = createSupabaseAdminClient();
+  const [claimResult, receiptResult] = await Promise.all([
+    admin
+      .from("standalone_reimbursements")
+      .select("*")
+      .eq("id", rowId)
+      .eq("user_id", userId)
+      .limit(1),
+    admin
+      .from("standalone_reimbursement_receipts")
+      .select("*")
+      .eq("reimbursement_id", rowId)
+      .eq("user_id", userId),
+  ]);
+  if (claimResult.error) throw claimResult.error;
+  if (receiptResult.error) throw receiptResult.error;
+
+  const [claim] = fromSupabaseRows<
+    typeof standaloneReimbursements.$inferSelect
+  >(claimResult.data);
+  const receipts = fromSupabaseRows<
+    typeof standaloneReimbursementReceipts.$inferSelect
+  >(receiptResult.data);
+  return { admin, claim, receipts };
+}
+
+export async function updateStandaloneReimbursement(
+  rowId: string,
+  input: Partial<StandaloneReimbursementInput>,
+) {
+  const userId = await requireUserId();
+  const { admin, claim, receipts } = await standaloneClaimAndReceipts(rowId, userId);
+  if (!claim) return null;
+
+  const state = deriveStandaloneReimbursementState(claim, receipts);
+  if (
+    input.expectedPaise !== undefined &&
+    input.expectedPaise < state.receivedPaise
+  ) {
+    throw new ApiError(
+      "Expected amount cannot be less than money already received.",
+      422,
+    );
+  }
+
+  const values: Record<string, unknown> = { updatedAt: stamp() };
+  if (input.title !== undefined) values.title = input.title;
+  if (input.source !== undefined) values.source = input.source;
+  if (input.kind !== undefined) values.kind = input.kind;
+  if (input.expectedPaise !== undefined) {
+    values.expectedPaise = input.expectedPaise;
+  }
+  if (input.claimedAt !== undefined) values.claimedAt = input.claimedAt;
+  if (input.dueDate !== undefined) values.dueDate = input.dueDate;
+  if (input.notes !== undefined) values.notes = input.notes;
+
+  const updateResult = await admin
+    .from("standalone_reimbursements")
+    .update(toSupabaseRow(values))
+    .eq("id", rowId)
+    .eq("user_id", userId)
+    .select("id")
+    .limit(1);
+  if (updateResult.error) throw updateResult.error;
+  if (!updateResult.data?.length) return null;
+  return rowId;
+}
+
+export async function deleteStandaloneReimbursement(rowId: string) {
+  const userId = await requireUserId();
+  const result = await createSupabaseAdminClient()
+    .from("standalone_reimbursements")
+    .delete()
+    .eq("id", rowId)
+    .eq("user_id", userId)
+    .select("id")
+    .limit(1);
+  if (result.error) throw result.error;
+  return !!result.data?.length;
+}
+
+export async function recordStandaloneReimbursementReceipt(
+  reimbursementId: string,
+  input: StandaloneReimbursementReceiptInput,
+) {
+  const userId = await requireUserId();
+  const { admin, claim, receipts } = await standaloneClaimAndReceipts(
+    reimbursementId,
+    userId,
+  );
+  if (!claim) throw new ApiError("Reimbursement not found.", 404);
+
+  const state = deriveStandaloneReimbursementState(claim, receipts);
+  if (state.status === "written_off") {
+    throw new ApiError(
+      "A payment cannot be recorded for a written-off reimbursement.",
+      409,
+    );
+  }
+  if (input.amountPaise > state.outstandingPaise) {
+    throw new ApiError(
+      "Payment cannot exceed the outstanding reimbursement amount.",
+      422,
+    );
+  }
+
+  const rowId = id("srr");
+  const result = await admin
+    .from("standalone_reimbursement_receipts")
+    .insert(
+      toSupabaseRow({
+        id: rowId,
+        userId,
+        reimbursementId,
+        amountPaise: input.amountPaise,
+        receivedAt: input.receivedAt,
+        note: input.note ?? "",
+        createdAt: stamp(),
+      }),
+    );
+  if (result.error) throw result.error;
+  return rowId;
 }
 
 async function touch(expenseId: string, userId: string) {
