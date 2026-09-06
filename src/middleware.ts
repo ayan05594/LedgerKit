@@ -13,13 +13,20 @@ const PUBLIC_API = new Set([
 ]);
 
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({ request });
+  const requestHeaders = new Headers(request.headers);
+  // Never trust a value supplied by the browser. Middleware replaces it only
+  // after Supabase has verified the session below.
+  requestHeaders.delete("x-ledgerkit-user-id");
+
+  const nextResponse = () =>
+    NextResponse.next({ request: { headers: requestHeaders } });
+  let response = nextResponse();
   const supabase = createServerClient(supabaseUrl(), supabasePublishableKey(), {
     cookies: {
       getAll: () => request.cookies.getAll(),
       setAll(values) {
         for (const { name, value } of values) request.cookies.set(name, value);
-        response = NextResponse.next({ request });
+        response = nextResponse();
         for (const { name, value, options } of values) {
           response.cookies.set(name, value, options);
         }
@@ -28,8 +35,18 @@ export async function middleware(request: NextRequest) {
   });
 
   const { data } = await supabase.auth.getClaims();
-  const isAuthenticated = Boolean(data?.claims.sub);
+  const userId = data?.claims.sub;
+  const isAuthenticated = Boolean(userId);
   const path = request.nextUrl.pathname;
+
+  if (userId) {
+    requestHeaders.set("x-ledgerkit-user-id", userId);
+    const authenticatedResponse = nextResponse();
+    for (const cookie of response.cookies.getAll()) {
+      authenticatedResponse.cookies.set(cookie);
+    }
+    response = authenticatedResponse;
+  }
 
   if (!isAuthenticated && !AUTH_PAGES.has(path) && !PUBLIC_API.has(path)) {
     if (path.startsWith("/api/")) {
