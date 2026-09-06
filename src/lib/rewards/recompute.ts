@@ -16,6 +16,8 @@ import {
 import { yearBounds, periodKey } from "./periods";
 import type { CapPeriod } from "./periods";
 import { requireUserId } from "@/lib/auth";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { fromSupabaseRows } from "@/lib/supabase/rows";
 
 function json<T>(raw: string, fallback: T): T {
   try {
@@ -109,15 +111,13 @@ async function refundMap(
 ): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   if (!expenseIds.length) return map;
-  const rows = await db
-    .select()
-    .from(refunds)
-    .where(
-      and(
-        eq(refunds.userId, userId),
-        inArray(refunds.expenseId, expenseIds),
-      ),
-    );
+  const result = await createSupabaseAdminClient()
+    .from("refunds")
+    .select("*")
+    .eq("user_id", userId)
+    .in("expense_id", expenseIds);
+  if (result.error) throw result.error;
+  const rows = fromSupabaseRows<typeof refunds.$inferSelect>(result.data);
   for (const r of rows) {
     if (r.status !== "received") continue;
     map.set(r.expenseId, (map.get(r.expenseId) ?? 0) + r.amountPaise);
@@ -278,24 +278,24 @@ export async function capsForInstruments(
 
   const ids = instrumentRows.map((instrument) => instrument.id);
   const { start, end } = yearBounds(Number(dateISO.slice(0, 4)));
-  const [ruleRows, expenseRows] = await Promise.all([
-    db
-      .select()
-      .from(rewardRules)
-      .where(inArray(rewardRules.instrumentId, ids)),
-    db
-      .select()
-      .from(expenses)
-      .where(
-        and(
-          eq(expenses.userId, authenticatedUserId),
-          inArray(expenses.instrumentId, ids),
-          gte(expenses.occurredAt, start),
-          lte(expenses.occurredAt, end),
-        ),
-      )
-      .orderBy(asc(expenses.occurredAt), asc(expenses.createdAt), asc(expenses.id)),
+  const admin = createSupabaseAdminClient();
+  const [ruleResult, expenseResult] = await Promise.all([
+    admin.from("reward_rules").select("*").in("instrument_id", ids),
+    admin
+      .from("expenses")
+      .select("*")
+      .eq("user_id", authenticatedUserId)
+      .in("instrument_id", ids)
+      .gte("occurred_at", start)
+      .lte("occurred_at", end)
+      .order("occurred_at")
+      .order("created_at")
+      .order("id"),
   ]);
+  if (ruleResult.error) throw ruleResult.error;
+  if (expenseResult.error) throw expenseResult.error;
+  const ruleRows = fromSupabaseRows<RewardRule>(ruleResult.data);
+  const expenseRows = fromSupabaseRows<Expense>(expenseResult.data);
   const refunded = await refundMap(
     expenseRows.map((expense) => expense.id),
     authenticatedUserId,

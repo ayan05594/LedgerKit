@@ -3,9 +3,8 @@ import { computeAccountBalances } from "@/server/mutations";
 import { handleRead } from "@/lib/api";
 import { requireUserId } from "@/lib/auth";
 import { db } from "@/db/client";
-import { settings } from "@/db/schema";
 import { seedReference } from "@/db/seed";
-import { eq } from "drizzle-orm";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,11 +13,13 @@ let referenceReady = false;
 
 async function ensureReferenceData() {
   if (referenceReady) return;
-  const [marker] = await db
-    .select({ key: settings.key })
-    .from(settings)
-    .where(eq(settings.key, "seeded_at"))
+  const result = await createSupabaseAdminClient()
+    .from("settings")
+    .select("key")
+    .eq("key", "seeded_at")
     .limit(1);
+  if (result.error) throw result.error;
+  const marker = result.data?.[0];
   if (!marker) await seedReference(db);
   referenceReady = true;
 }

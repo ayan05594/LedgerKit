@@ -19,6 +19,8 @@ import {
 import { recomputeForDate, recomputeInstrumentYear } from "@/lib/rewards/recompute";
 import { todayISO } from "@/lib/rewards/periods";
 import { requireUserId } from "@/lib/auth";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { fromSupabaseRows } from "@/lib/supabase/rows";
 
 const id = (p: string) => `${p}_${nanoid(12)}`;
 const stamp = () => new Date().toISOString();
@@ -609,85 +611,49 @@ export async function deleteAccount(rowId: string) {
  */
 export async function computeAccountBalances(authenticatedUserId?: string) {
   const userId = authenticatedUserId ?? await requireUserId();
-  const all = await db.select().from(accounts);
+  const admin = createSupabaseAdminClient();
+  const [accountResult, expenseResult, refundResult, transferResult] =
+    await Promise.all([
+      admin.from("accounts").select("*"),
+      admin
+        .from("expenses")
+        .select("account_id,amount_paise,occurred_at")
+        .eq("user_id", userId)
+        .not("account_id", "is", null),
+      admin
+        .from("refunds")
+        .select("to_account_id,amount_paise,refunded_at")
+        .eq("user_id", userId)
+        .eq("status", "received")
+        .not("to_account_id", "is", null),
+      admin
+        .from("transfers")
+        .select("account_id,amount_paise,occurred_at,direction")
+        .eq("user_id", userId)
+        .not("account_id", "is", null),
+    ]);
+  const error = [accountResult, expenseResult, refundResult, transferResult]
+    .find((result) => result.error)?.error;
+  if (error) throw error;
+  const all = fromSupabaseRows<typeof accounts.$inferSelect>(accountResult.data);
   if (!all.length) return [];
-
-  // Aggregate once per transaction type instead of issuing four queries for
-  // every account. This keeps the reference screen fast on Supabase's nano DB.
-  const [spentRows, refundedRows, sentRows, receivedRows] = await Promise.all([
-    db
-      .select({
-        accountId: expenses.accountId,
-        v: sql<string>`coalesce(sum(${expenses.amountPaise}), 0)`,
-      })
-      .from(expenses)
-      .innerJoin(accounts, eq(expenses.accountId, accounts.id))
-      .where(
-        and(
-          eq(expenses.userId, userId),
-          gte(expenses.occurredAt, accounts.openingDate),
-        ),
-      )
-      .groupBy(expenses.accountId),
-    db
-      .select({
-        accountId: refunds.toAccountId,
-        v: sql<string>`coalesce(sum(${refunds.amountPaise}), 0)`,
-      })
-      .from(refunds)
-      .innerJoin(accounts, eq(refunds.toAccountId, accounts.id))
-      .where(
-        and(
-          eq(refunds.userId, userId),
-          eq(refunds.status, "received"),
-          gte(refunds.refundedAt, accounts.openingDate),
-        ),
-      )
-      .groupBy(refunds.toAccountId),
-    db
-      .select({
-        accountId: transfers.accountId,
-        v: sql<string>`coalesce(sum(${transfers.amountPaise}), 0)`,
-      })
-      .from(transfers)
-      .innerJoin(accounts, eq(transfers.accountId, accounts.id))
-      .where(
-        and(
-          eq(transfers.userId, userId),
-          eq(transfers.direction, "sent"),
-          gte(transfers.occurredAt, accounts.openingDate),
-        ),
-      )
-      .groupBy(transfers.accountId),
-    db
-      .select({
-        accountId: transfers.accountId,
-        v: sql<string>`coalesce(sum(${transfers.amountPaise}), 0)`,
-      })
-      .from(transfers)
-      .innerJoin(accounts, eq(transfers.accountId, accounts.id))
-      .where(
-        and(
-          eq(transfers.userId, userId),
-          eq(transfers.direction, "received"),
-          gte(transfers.occurredAt, accounts.openingDate),
-        ),
-      )
-      .groupBy(transfers.accountId),
-  ]);
-
-  const values = (rows: { accountId: string | null; v: string }[]) =>
-    new Map(rows.map((row) => [row.accountId, Number(row.v)]));
-  const spentBy = values(spentRows);
-  const refundedBy = values(refundedRows);
-  const sentBy = values(sentRows);
-  const receivedBy = values(receivedRows);
+  const expenseRows = fromSupabaseRows<Pick<typeof expenses.$inferSelect, "accountId" | "amountPaise" | "occurredAt">>(expenseResult.data);
+  const refundRows = fromSupabaseRows<Pick<typeof refunds.$inferSelect, "toAccountId" | "amountPaise" | "refundedAt">>(refundResult.data);
+  const transferRows = fromSupabaseRows<Pick<typeof transfers.$inferSelect, "accountId" | "amountPaise" | "occurredAt" | "direction">>(transferResult.data);
 
   return all.map((account) => {
-    const spent = spentBy.get(account.id) ?? 0;
-    const refunded = refundedBy.get(account.id) ?? 0;
-    const sent = sentBy.get(account.id) ?? 0;
-    const received = receivedBy.get(account.id) ?? 0;
+    const spent = expenseRows
+      .filter((row) => row.accountId === account.id && row.occurredAt >= account.openingDate)
+      .reduce((sum, row) => sum + row.amountPaise, 0);
+    const refunded = refundRows
+      .filter((row) => row.toAccountId === account.id && row.refundedAt >= account.openingDate)
+      .reduce((sum, row) => sum + row.amountPaise, 0);
+    const sent = transferRows
+      .filter((row) => row.accountId === account.id && row.direction === "sent" && row.occurredAt >= account.openingDate)
+      .reduce((sum, row) => sum + row.amountPaise, 0);
+    const received = transferRows
+      .filter((row) => row.accountId === account.id && row.direction === "received" && row.occurredAt >= account.openingDate)
+      .reduce((sum, row) => sum + row.amountPaise, 0);
 
     const balancePaise =
       account.openingBalancePaise - spent + refunded - sent + received;

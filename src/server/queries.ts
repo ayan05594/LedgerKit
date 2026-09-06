@@ -1,19 +1,4 @@
 import "server-only";
-import { and, asc, desc, eq, gte, inArray, lte, like, or, sql } from "drizzle-orm";
-import { db } from "@/db/client";
-import {
-  accounts,
-  adjustments,
-  categories,
-  expenses,
-  instruments,
-  merchants,
-  paymentApps,
-  people,
-  refunds,
-  rewardRules,
-  transfers,
-} from "@/db/schema";
 import type {
   Account,
   Adjustment,
@@ -32,6 +17,8 @@ import { monthBounds } from "@/lib/rewards/periods";
 import { capsForInstruments } from "@/lib/rewards/recompute";
 import type { CapStatus } from "@/lib/rewards/engine";
 import { requireUserId } from "@/lib/auth";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { fromSupabaseRows } from "@/lib/supabase/rows";
 
 export interface ExpenseRow {
   expense: Expense;
@@ -59,52 +46,34 @@ export interface Reference {
 export async function getReference(
   authenticatedUserId?: string,
 ): Promise<Reference> {
-  const [categoryRows, merchantRows, appRows, instrumentRows, accountRows, peopleRows, ruleRows] = await Promise.all([
-    db
-      .select()
-      .from(categories)
-      .where(eq(categories.archived, false))
-      .orderBy(asc(categories.sortOrder)),
-    db.select().from(merchants).orderBy(asc(merchants.name)),
-    db
-      .select()
-      .from(paymentApps)
-      .orderBy(asc(paymentApps.sortOrder)),
-    db
-      .select()
-      .from(instruments)
-      .where(eq(instruments.archived, false))
-      .orderBy(asc(instruments.sortOrder)),
-    db
-      .select()
-      .from(accounts)
-      .where(eq(accounts.archived, false))
-      .orderBy(asc(accounts.sortOrder)),
+  const admin = createSupabaseAdminClient();
+  const results = await Promise.all([
+    admin.from("categories").select("*").eq("archived", false).order("sort_order"),
+    admin.from("merchants").select("*").order("name"),
+    admin.from("payment_apps").select("*").order("sort_order"),
+    admin.from("instruments").select("*").eq("archived", false).order("sort_order"),
+    admin.from("accounts").select("*").eq("archived", false).order("sort_order"),
     authenticatedUserId
-      ? db
-          .select()
-          .from(people)
-          .where(
-            and(
-              eq(people.userId, authenticatedUserId),
-              eq(people.archived, false),
-            ),
-          )
-          .orderBy(asc(people.name))
-      : Promise.resolve([]),
-    db
-      .select()
-      .from(rewardRules)
-      .orderBy(desc(rewardRules.priority)),
+      ? admin
+          .from("people")
+          .select("*")
+          .eq("user_id", authenticatedUserId)
+          .eq("archived", false)
+          .order("name")
+      : Promise.resolve({ data: [], error: null }),
+    admin.from("reward_rules").select("*").order("priority", { ascending: false }),
   ]);
+  const error = results.find((result) => result.error)?.error;
+  if (error) throw error;
+  const [categoryResult, merchantResult, appResult, instrumentResult, accountResult, peopleResult, ruleResult] = results;
   return {
-    categories: categoryRows,
-    merchants: merchantRows,
-    apps: appRows,
-    instruments: instrumentRows,
-    accounts: accountRows,
-    people: peopleRows,
-    rules: ruleRows,
+    categories: fromSupabaseRows<Category>(categoryResult.data),
+    merchants: fromSupabaseRows<Merchant>(merchantResult.data),
+    apps: fromSupabaseRows<PaymentApp>(appResult.data),
+    instruments: fromSupabaseRows<Instrument>(instrumentResult.data),
+    accounts: fromSupabaseRows<Account>(accountResult.data),
+    people: fromSupabaseRows<Person>(peopleResult.data),
+    rules: fromSupabaseRows<RewardRule>(ruleResult.data),
   };
 }
 
@@ -137,20 +106,40 @@ async function hydrate(
 ): Promise<ExpenseRow[]> {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
-  const [adj, ref, instrumentRows, accountRows, categoryRows, appRows] = await Promise.all([
-    db
-      .select()
-      .from(adjustments)
-      .where(and(eq(adjustments.userId, userId), inArray(adjustments.expenseId, ids))),
-    db
-      .select()
-      .from(refunds)
-      .where(and(eq(refunds.userId, userId), inArray(refunds.expenseId, ids))),
-    reference?.instruments ?? db.select().from(instruments),
-    reference?.accounts ?? db.select().from(accounts),
-    reference?.categories ?? db.select().from(categories),
-    reference?.apps ?? db.select().from(paymentApps),
+  const admin = createSupabaseAdminClient();
+  const results = await Promise.all([
+    admin.from("adjustments").select("*").eq("user_id", userId).in("expense_id", ids),
+    admin.from("refunds").select("*").eq("user_id", userId).in("expense_id", ids),
+    reference?.instruments
+      ? Promise.resolve({ data: reference.instruments, error: null, mapped: true })
+      : admin.from("instruments").select("*"),
+    reference?.accounts
+      ? Promise.resolve({ data: reference.accounts, error: null, mapped: true })
+      : admin.from("accounts").select("*"),
+    reference?.categories
+      ? Promise.resolve({ data: reference.categories, error: null, mapped: true })
+      : admin.from("categories").select("*"),
+    reference?.apps
+      ? Promise.resolve({ data: reference.apps, error: null, mapped: true })
+      : admin.from("payment_apps").select("*"),
   ]);
+  const error = results.find((result) => result.error)?.error;
+  if (error) throw error;
+  const [adjResult, refundResult, instrumentResult, accountResult, categoryResult, appResult] = results;
+  const adj = fromSupabaseRows<Adjustment>(adjResult.data);
+  const ref = fromSupabaseRows<Refund>(refundResult.data);
+  const instrumentRows = "mapped" in instrumentResult
+    ? instrumentResult.data as Instrument[]
+    : fromSupabaseRows<Instrument>(instrumentResult.data);
+  const accountRows = "mapped" in accountResult
+    ? accountResult.data as Account[]
+    : fromSupabaseRows<Account>(accountResult.data);
+  const categoryRows = "mapped" in categoryResult
+    ? categoryResult.data as Category[]
+    : fromSupabaseRows<Category>(categoryResult.data);
+  const appRows = "mapped" in appResult
+    ? appResult.data as PaymentApp[]
+    : fromSupabaseRows<PaymentApp>(appResult.data);
 
   const instMap = new Map(instrumentRows.map((i) => [i.id, i]));
   const acctMap = new Map(accountRows.map((a) => [a.id, a]));
@@ -198,44 +187,50 @@ export async function listExpenses(
   authenticatedUserId?: string,
 ): Promise<ExpenseRow[]> {
   const userId = authenticatedUserId ?? await requireUserId();
-  const clauses = [eq(expenses.userId, userId)];
-  if (f.from) clauses.push(gte(expenses.occurredAt, f.from));
-  if (f.to) clauses.push(lte(expenses.occurredAt, f.to));
-  if (f.instrumentId) clauses.push(eq(expenses.instrumentId, f.instrumentId));
-  if (f.accountId) clauses.push(eq(expenses.accountId, f.accountId));
-  if (f.categorySlug) clauses.push(eq(expenses.categorySlug, f.categorySlug));
-  if (f.appSlug) clauses.push(eq(expenses.paymentAppSlug, f.appSlug));
-  if (f.reimbursableOnly) clauses.push(eq(expenses.reimbursable, true));
-  if (f.search) {
-    const q = `%${f.search.toLowerCase()}%`;
-    clauses.push(
-      or(
-        like(sql`lower(${expenses.description})`, q),
-        like(sql`lower(${expenses.merchantName})`, q),
-        like(sql`lower(${expenses.customLabel})`, q),
-        like(sql`lower(${expenses.notes})`, q),
-      )!,
-    );
-  }
-
-  const rows = await db
-    .select()
-    .from(expenses)
-    .where(clauses.length ? and(...clauses) : undefined)
-    .orderBy(desc(expenses.occurredAt), desc(expenses.createdAt))
+  const admin = createSupabaseAdminClient();
+  let query = admin
+    .from("expenses")
+    .select("*")
+    .eq("user_id", userId)
+    .order("occurred_at", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(f.limit ?? 500);
+  if (f.from) query = query.gte("occurred_at", f.from);
+  if (f.to) query = query.lte("occurred_at", f.to);
+  if (f.instrumentId) query = query.eq("instrument_id", f.instrumentId);
+  if (f.accountId) query = query.eq("account_id", f.accountId);
+  if (f.categorySlug) query = query.eq("category_slug", f.categorySlug);
+  if (f.appSlug) query = query.eq("payment_app_slug", f.appSlug);
+  if (f.reimbursableOnly) query = query.eq("reimbursable", true);
+  const result = await query;
+  if (result.error) throw result.error;
+  const rows = fromSupabaseRows<Expense>(result.data);
 
   const hydrated = await hydrate(rows, userId);
-  return f.hasRefund ? hydrated.filter((r) => r.refunds.length > 0) : hydrated;
+  const searched = f.search
+    ? hydrated.filter((row) => {
+        const needle = f.search!.toLowerCase();
+        return [
+          row.expense.description,
+          row.expense.merchantName,
+          row.expense.customLabel,
+          row.expense.notes,
+        ].some((value) => value?.toLowerCase().includes(needle));
+      })
+    : hydrated;
+  return f.hasRefund ? searched.filter((r) => r.refunds.length > 0) : searched;
 }
 
 export async function getExpense(id: string): Promise<ExpenseRow | null> {
   const userId = await requireUserId();
-  const [row] = await db
-    .select()
-    .from(expenses)
-    .where(and(eq(expenses.id, id), eq(expenses.userId, userId)))
+  const result = await createSupabaseAdminClient()
+    .from("expenses")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", userId)
     .limit(1);
+  if (result.error) throw result.error;
+  const [row] = fromSupabaseRows<Expense>(result.data);
   if (!row) return null;
   return (await hydrate([row], userId))[0] ?? null;
 }
@@ -296,49 +291,50 @@ export async function getMonthSummary(
   const prevMonth = month === 1 ? 12 : month - 1;
   const prevYear = month === 1 ? year - 1 : year;
   const prev = monthBounds(prevYear, prevMonth);
+  const admin = createSupabaseAdminClient();
   const [
-    expenseRows,
-    allInstruments,
-    allAccounts,
-    catRows,
-    appRows,
-    monthTransfers,
+    expenseResult,
+    instrumentResult,
+    accountResult,
+    categoryResult,
+    appResult,
+    transferResult,
   ] = await Promise.all([
-    db
-      .select()
-      .from(expenses)
-      .where(
-        and(
-          eq(expenses.userId, userId),
-          gte(expenses.occurredAt, prev.start),
-          lte(expenses.occurredAt, end),
-        ),
-      )
-      .orderBy(desc(expenses.occurredAt), desc(expenses.createdAt))
+    admin
+      .from("expenses")
+      .select("*")
+      .eq("user_id", userId)
+      .gte("occurred_at", prev.start)
+      .lte("occurred_at", end)
+      .order("occurred_at", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(20000),
-    db
-      .select()
-      .from(instruments)
-      .where(eq(instruments.archived, false))
-      .orderBy(asc(instruments.sortOrder)),
-    db
-      .select()
-      .from(accounts)
-      .where(eq(accounts.archived, false))
-      .orderBy(asc(accounts.sortOrder)),
-    db.select().from(categories),
-    db.select().from(paymentApps),
-    db
-      .select()
-      .from(transfers)
-      .where(
-        and(
-          eq(transfers.userId, userId),
-          gte(transfers.occurredAt, start),
-          lte(transfers.occurredAt, end),
-        ),
-      ),
+    admin.from("instruments").select("*").eq("archived", false).order("sort_order"),
+    admin.from("accounts").select("*").eq("archived", false).order("sort_order"),
+    admin.from("categories").select("*"),
+    admin.from("payment_apps").select("*"),
+    admin
+      .from("transfers")
+      .select("*")
+      .eq("user_id", userId)
+      .gte("occurred_at", start)
+      .lte("occurred_at", end),
   ]);
+  const loadError = [
+    expenseResult,
+    instrumentResult,
+    accountResult,
+    categoryResult,
+    appResult,
+    transferResult,
+  ].find((result) => result.error)?.error;
+  if (loadError) throw loadError;
+  const expenseRows = fromSupabaseRows<Expense>(expenseResult.data);
+  const allInstruments = fromSupabaseRows<Instrument>(instrumentResult.data);
+  const allAccounts = fromSupabaseRows<Account>(accountResult.data);
+  const catRows = fromSupabaseRows<Category>(categoryResult.data);
+  const appRows = fromSupabaseRows<PaymentApp>(appResult.data);
+  const monthTransfers = fromSupabaseRows<Transfer>(transferResult.data);
   const [hydratedRows, capsByInstrument] = await Promise.all([
     hydrate(expenseRows, userId, {
       instruments: allInstruments,
@@ -500,19 +496,20 @@ export async function getPeopleBalances(
   authenticatedUserId?: string,
 ): Promise<PersonBalance[]> {
   const userId = authenticatedUserId ?? await requireUserId();
-  const [allPeople, allTransfers] = await Promise.all([
-    db
-      .select()
-      .from(people)
-      .where(
-        and(eq(people.userId, userId), eq(people.archived, false)),
-      )
-      .orderBy(asc(people.name)),
-    db
-      .select()
-      .from(transfers)
-      .where(eq(transfers.userId, userId)),
+  const admin = createSupabaseAdminClient();
+  const [peopleResult, transferResult] = await Promise.all([
+    admin
+      .from("people")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("archived", false)
+      .order("name"),
+    admin.from("transfers").select("*").eq("user_id", userId),
   ]);
+  if (peopleResult.error) throw peopleResult.error;
+  if (transferResult.error) throw transferResult.error;
+  const allPeople = fromSupabaseRows<Person>(peopleResult.data);
+  const allTransfers = fromSupabaseRows<Transfer>(transferResult.data);
 
   return allPeople.map((person) => {
     const mine = allTransfers.filter((t) => t.personId === person.id);
@@ -551,15 +548,21 @@ export async function listTransfers(
   personColor: string;
 })[]> {
   const userId = authenticatedUserId ?? await requireUserId();
-  const [peopleRows, rows] = await Promise.all([
-    db.select().from(people).where(eq(people.userId, userId)),
-    db
-      .select()
-      .from(transfers)
-      .where(eq(transfers.userId, userId))
-      .orderBy(desc(transfers.occurredAt), desc(transfers.createdAt))
+  const admin = createSupabaseAdminClient();
+  const [peopleResult, transferResult] = await Promise.all([
+    admin.from("people").select("*").eq("user_id", userId),
+    admin
+      .from("transfers")
+      .select("*")
+      .eq("user_id", userId)
+      .order("occurred_at", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(limit),
   ]);
+  if (peopleResult.error) throw peopleResult.error;
+  if (transferResult.error) throw transferResult.error;
+  const peopleRows = fromSupabaseRows<Person>(peopleResult.data);
+  const rows = fromSupabaseRows<Transfer>(transferResult.data);
   const peopleMap = new Map(peopleRows.map((p) => [p.id, p]));
   return rows.map((t) => ({
       ...t,
@@ -580,40 +583,42 @@ export interface PendingSummary {
 
 export async function getPending(): Promise<PendingSummary> {
   const userId = await requireUserId();
-  const [reimbursementExpenses, pendingRefundRows, balances] = await Promise.all([
-    db
-      .select()
-      .from(expenses)
-      .where(
-        and(
-          eq(expenses.userId, userId),
-          eq(expenses.reimbursable, true),
-          inArray(expenses.reimbursementStatus, ["pending", "partial"]),
-        ),
-      )
-      .orderBy(asc(expenses.reimbursementDueDate), desc(expenses.occurredAt)),
-    db
-      .select({ id: refunds.expenseId })
-      .from(refunds)
-      .where(and(eq(refunds.userId, userId), eq(refunds.status, "pending"))),
+  const admin = createSupabaseAdminClient();
+  const [expenseResult, refundResult, balances] = await Promise.all([
+    admin
+      .from("expenses")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("reimbursable", true)
+      .in("reimbursement_status", ["pending", "partial"])
+      .order("reimbursement_due_date")
+      .order("occurred_at", { ascending: false }),
+    admin
+      .from("refunds")
+      .select("expense_id")
+      .eq("user_id", userId)
+      .eq("status", "pending"),
     getPeopleBalances(userId),
   ]);
+  if (expenseResult.error) throw expenseResult.error;
+  if (refundResult.error) throw refundResult.error;
+  const reimbursementExpenses = fromSupabaseRows<Expense>(expenseResult.data);
+  const pendingRefundRows = fromSupabaseRows<{ expenseId: string }>(refundResult.data);
   const reimbursementRows = await hydrate(reimbursementExpenses, userId);
-  const pendingRefundIds = pendingRefundRows.map((r) => r.id);
-  const refundRows = pendingRefundIds.length
-    ? await hydrate(
-        await db
-          .select()
-          .from(expenses)
-          .where(
-            and(
-              eq(expenses.userId, userId),
-              inArray(expenses.id, pendingRefundIds),
-            ),
-          ),
-        userId,
-      )
-    : [];
+  const pendingRefundIds = pendingRefundRows.map((r) => r.expenseId);
+  let refundRows: ExpenseRow[] = [];
+  if (pendingRefundIds.length) {
+    const pendingExpenseResult = await admin
+      .from("expenses")
+      .select("*")
+      .eq("user_id", userId)
+      .in("id", pendingRefundIds);
+    if (pendingExpenseResult.error) throw pendingExpenseResult.error;
+    refundRows = await hydrate(
+      fromSupabaseRows<Expense>(pendingExpenseResult.data),
+      userId,
+    );
+  }
 
   return {
     reimbursements: reimbursementRows,
@@ -633,25 +638,43 @@ export async function getPending(): Promise<PendingSummary> {
 /* ----------------------------------------------------------------- cards */
 
 export async function getInstrumentDetail(id: string) {
-  const [instrument] = await db.select().from(instruments).where(eq(instruments.id, id)).limit(1);
+  const admin = createSupabaseAdminClient();
+  const [instrumentResult, ruleResult] = await Promise.all([
+    admin.from("instruments").select("*").eq("id", id).limit(1),
+    admin
+      .from("reward_rules")
+      .select("*")
+      .eq("instrument_id", id)
+      .order("priority", { ascending: false })
+      .order("name"),
+  ]);
+  if (instrumentResult.error) throw instrumentResult.error;
+  if (ruleResult.error) throw ruleResult.error;
+  const [instrument] = fromSupabaseRows<Instrument>(instrumentResult.data);
   if (!instrument) return null;
-  const rules = await db
-    .select()
-    .from(rewardRules)
-    .where(eq(rewardRules.instrumentId, id))
-    .orderBy(desc(rewardRules.priority), asc(rewardRules.name));
+  const rules = fromSupabaseRows<RewardRule>(ruleResult.data);
   return { instrument, rules };
 }
 
 export async function getYearRewardTrend(instrumentId: string, year: number) {
+  const yearStart = monthBounds(year, 1).start;
+  const yearEnd = monthBounds(year, 12).end;
+  const rows = await listExpenses({
+    from: yearStart,
+    to: yearEnd,
+    instrumentId,
+    limit: 10000,
+  });
   const out: { month: number; rewardPaise: number; netPaise: number }[] = [];
   for (let m = 1; m <= 12; m++) {
     const { start, end } = monthBounds(year, m);
-    const rows = await listExpenses({ from: start, to: end, instrumentId, limit: 10000 });
+    const monthRows = rows.filter(
+      (row) => row.expense.occurredAt >= start && row.expense.occurredAt <= end,
+    );
     out.push({
       month: m,
-      rewardPaise: rows.reduce((s, r) => s + r.math.rewardValuePaise, 0),
-      netPaise: rows.reduce((s, r) => s + r.math.netSpendPaise, 0),
+      rewardPaise: monthRows.reduce((s, r) => s + r.math.rewardValuePaise, 0),
+      netPaise: monthRows.reduce((s, r) => s + r.math.netSpendPaise, 0),
     });
   }
   return out;

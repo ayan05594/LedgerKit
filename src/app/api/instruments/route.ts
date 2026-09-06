@@ -1,13 +1,13 @@
 import type { Instrument, RewardRule } from "@/db/schema";
 import { createInstrument } from "@/server/mutations";
-import { handle } from "@/lib/api";
+import { handle, handleRead } from "@/lib/api";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fromSupabaseRows } from "@/lib/supabase/rows";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return handle(async () => {
+  return handleRead(async () => {
     const admin = createSupabaseAdminClient();
     const [instrumentResult, ruleResult] = await Promise.all([
       admin.from("instruments").select("*").eq("archived", false).order("sort_order"),
