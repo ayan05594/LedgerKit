@@ -1,10 +1,10 @@
 import { createAccount, computeAccountBalances } from "@/server/mutations";
-import { handle } from "@/lib/api";
+import { handle, handleRead } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return handle(() => computeAccountBalances());
+  return handleRead(() => computeAccountBalances());
 }
 
 export async function POST(request: Request) {

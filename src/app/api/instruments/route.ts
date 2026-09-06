@@ -1,11 +1,11 @@
 import { getReference } from "@/server/queries";
 import { createInstrument } from "@/server/mutations";
-import { handle } from "@/lib/api";
+import { handle, handleRead } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return handle(async () => {
+  return handleRead(async () => {
     const { instruments, rules } = await getReference();
     return instruments.map((instrument) => ({
       instrument,

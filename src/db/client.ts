@@ -17,23 +17,53 @@ if (!databaseUrl) {
 }
 
 // Supabase's transaction pooler and serverless functions work best without
-// prepared statements. Reuse the client while a Vercel instance stays warm.
-const globalForDb = globalThis as unknown as {
-  __ledgerkitSql?: ReturnType<typeof postgres>;
-};
-
-export const sql =
-  globalForDb.__ledgerkitSql ??
-  postgres(databaseUrl, {
+// prepared statements. Vercel can freeze a warm function while its TCP sockets
+// quietly expire, so the client below can be replaced before a resumed read.
+function createSqlClient() {
+  return postgres(databaseUrl!, {
     prepare: false,
     // Summary screens intentionally run independent reads in parallel. A tiny
     // pool avoids serialising dozens of round trips behind one connection.
     max: 5,
-    idle_timeout: 20,
-    connect_timeout: 10,
+    idle_timeout: 10,
+    connect_timeout: 5,
+    keep_alive: 5,
   });
+}
+
+const globalForDb = globalThis as unknown as {
+  __ledgerkitSql?: ReturnType<typeof postgres>;
+};
+
+export let sql = globalForDb.__ledgerkitSql ?? createSqlClient();
+export let db = drizzle(sql, { schema });
 
 if (process.env.NODE_ENV !== "production") globalForDb.__ledgerkitSql = sql;
 
-export const db = drizzle(sql, { schema });
+let lastDatabaseReadAt = Date.now();
+let recyclePromise: Promise<void> | null = null;
+
+async function replaceDatabaseClient() {
+  const staleSql = sql;
+  sql = createSqlClient();
+  db = drizzle(sql, { schema });
+  if (process.env.NODE_ENV !== "production") globalForDb.__ledgerkitSql = sql;
+  await staleSql.end({ timeout: 0 }).catch(() => undefined);
+}
+
+// Recycle sockets after an idle/frozen period so a query is never handed to a
+// connection that Supabase's pooler has already expired.
+export async function prepareDatabaseRead(force = false) {
+  const now = Date.now();
+  const resumedAfterIdle = now - lastDatabaseReadAt > 15_000;
+  lastDatabaseReadAt = now;
+
+  if (recyclePromise) return recyclePromise;
+  if (!force && !resumedAfterIdle) return;
+
+  recyclePromise = replaceDatabaseClient().finally(() => {
+    recyclePromise = null;
+  });
+  return recyclePromise;
+}
 export { schema };

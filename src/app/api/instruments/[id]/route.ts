@@ -1,17 +1,19 @@
 import { getInstrumentDetail, getYearRewardTrend } from "@/server/queries";
 import { deleteInstrument, updateInstrument } from "@/server/mutations";
-import { handle, fail, type Params } from "@/lib/api";
+import { ApiError, handle, handleRead, type Params } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, { params }: Params) {
   const { id } = await params;
-  const detail = await getInstrumentDetail(id);
-  if (!detail) return fail("Card not found", 404);
   const year = Number(
     new URL(request.url).searchParams.get("year") ?? new Date().getFullYear(),
   );
-  return handle(async () => ({ ...detail, trend: await getYearRewardTrend(id, year) }));
+  return handleRead(async () => {
+    const detail = await getInstrumentDetail(id);
+    if (!detail) throw new ApiError("Card not found", 404);
+    return { ...detail, trend: await getYearRewardTrend(id, year) };
+  });
 }
 
 export async function PATCH(request: Request, { params }: Params) {

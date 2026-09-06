@@ -1,12 +1,12 @@
 import { getPeopleBalances } from "@/server/queries";
 import { createPerson } from "@/server/mutations";
-import { handle } from "@/lib/api";
+import { handle, handleRead } from "@/lib/api";
 import { requireUserId } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return handle(async () => {
+  return handleRead(async () => {
     const userId = await requireUserId();
     return getPeopleBalances(userId);
   });

@@ -1,6 +1,6 @@
 import { listExpenses } from "@/server/queries";
 import { createExpense } from "@/server/mutations";
-import { handle, fail } from "@/lib/api";
+import { handle, handleRead, fail } from "@/lib/api";
 import { expenseSchema } from "@/lib/validation";
 import { requireUserId } from "@/lib/auth";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const p = new URL(request.url).searchParams;
   const get = (k: string) => p.get(k) || undefined;
-  return handle(async () => {
+  return handleRead(async () => {
     const userId = await requireUserId();
     return listExpenses({
       from: get("from"),

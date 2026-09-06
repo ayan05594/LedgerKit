@@ -1,6 +1,6 @@
 import { getReference } from "@/server/queries";
 import { computeAccountBalances } from "@/server/mutations";
-import { handle } from "@/lib/api";
+import { handleRead } from "@/lib/api";
 import { requireUserId } from "@/lib/auth";
 import { db } from "@/db/client";
 import { settings } from "@/db/schema";
@@ -24,7 +24,7 @@ async function ensureReferenceData() {
 }
 
 export async function GET() {
-  return handle(async () => {
+  return handleRead(async () => {
     const userId = await requireUserId();
     // Accounts created before the production migrations completed may have
     // missed the original registration-time seed. Repair that once, safely.

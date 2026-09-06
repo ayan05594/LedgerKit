@@ -1,15 +1,17 @@
 import { getExpense } from "@/server/queries";
 import { deleteExpense, updateExpense } from "@/server/mutations";
-import { handle, fail, type Params } from "@/lib/api";
+import { ApiError, handle, handleRead, fail, type Params } from "@/lib/api";
 import { expenseSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_: Request, { params }: Params) {
   const { id } = await params;
-  const row = await getExpense(id);
-  if (!row) return fail("Expense not found", 404);
-  return handle(() => row);
+  return handleRead(async () => {
+    const row = await getExpense(id);
+    if (!row) throw new ApiError("Expense not found", 404);
+    return row;
+  });
 }
 
 export async function PATCH(request: Request, { params }: Params) {
