@@ -20,7 +20,7 @@ import { recomputeForDate, recomputeInstrumentYear } from "@/lib/rewards/recompu
 import { todayISO } from "@/lib/rewards/periods";
 import { requireUserId } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { fromSupabaseRows } from "@/lib/supabase/rows";
+import { fromSupabaseRows, toSupabaseRow } from "@/lib/supabase/rows";
 
 const id = (p: string) => `${p}_${nanoid(12)}`;
 const stamp = () => new Date().toISOString();
@@ -76,8 +76,9 @@ export async function createExpense(input: ExpenseInput) {
   const reimbursable = !!input.reimbursable;
   const expected = reimbursable ? (input.reimbursementExpectedPaise ?? 0) : 0;
 
-  await db.insert(expenses)
-    .values({
+  const result = await createSupabaseAdminClient()
+    .from("expenses")
+    .insert(toSupabaseRow({
       id: rowId,
       userId,
       occurredAt: input.occurredAt,
@@ -104,7 +105,8 @@ export async function createExpense(input: ExpenseInput) {
       rewardOverridePaise: input.rewardOverridePaise ?? null,
       createdAt: stamp(),
       updatedAt: stamp(),
-    });
+    }));
+  if (result.error) throw result.error;
 
   await recomputeForDate(input.instrumentId ?? null, input.occurredAt);
   return rowId;
@@ -112,11 +114,17 @@ export async function createExpense(input: ExpenseInput) {
 
 export async function updateExpense(rowId: string, input: Partial<ExpenseInput>) {
   const userId = await requireUserId();
-  const [existing] = await db
-    .select()
-    .from(expenses)
-    .where(and(eq(expenses.id, rowId), eq(expenses.userId, userId)))
-    .limit(1);
+  const admin = createSupabaseAdminClient();
+  const existingResult = await admin
+    .from("expenses")
+    .select("*")
+    .eq("id", rowId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (existingResult.error) throw existingResult.error;
+  const [existing] = fromSupabaseRows<typeof expenses.$inferSelect>(
+    existingResult.data ? [existingResult.data] : [],
+  );
   if (!existing) return null;
 
   const reimbursable = input.reimbursable ?? existing.reimbursable;
@@ -125,8 +133,9 @@ export async function updateExpense(rowId: string, input: Partial<ExpenseInput>)
     : 0;
   const received = reimbursable ? existing.reimbursementReceivedPaise : 0;
 
-  await db.update(expenses)
-    .set({
+  const updateResult = await admin
+    .from("expenses")
+    .update(toSupabaseRow({
       occurredAt: input.occurredAt ?? existing.occurredAt,
       amountPaise: input.amountPaise ?? existing.amountPaise,
       description: input.description ?? existing.description,
@@ -161,29 +170,51 @@ export async function updateExpense(rowId: string, input: Partial<ExpenseInput>)
           ? input.rewardOverridePaise
           : existing.rewardOverridePaise,
       updatedAt: stamp(),
-    })
-    .where(and(eq(expenses.id, rowId), eq(expenses.userId, userId)));
+    }))
+    .eq("id", rowId)
+    .eq("user_id", userId);
+  if (updateResult.error) throw updateResult.error;
 
   // Both the old and the new card need their caps replayed.
-  await recomputeForDate(existing.instrumentId, existing.occurredAt);
-  await recomputeForDate(
-    input.instrumentId !== undefined ? input.instrumentId : existing.instrumentId,
-    input.occurredAt ?? existing.occurredAt,
+  const oldContext = existing.instrumentId
+    ? `${existing.instrumentId}:${existing.occurredAt.slice(0, 4)}`
+    : null;
+  const nextInstrumentId =
+    input.instrumentId !== undefined ? input.instrumentId : existing.instrumentId;
+  const nextOccurredAt = input.occurredAt ?? existing.occurredAt;
+  const newContext = nextInstrumentId
+    ? `${nextInstrumentId}:${nextOccurredAt.slice(0, 4)}`
+    : null;
+  const contexts = new Set([oldContext, newContext].filter(Boolean));
+  await Promise.all(
+    [...contexts].map((context) => {
+      const [instrumentId, year] = context!.split(":");
+      return recomputeInstrumentYear(instrumentId, Number(year));
+    }),
   );
   return rowId;
 }
 
 export async function deleteExpense(rowId: string) {
   const userId = await requireUserId();
-  const [existing] = await db
-    .select()
-    .from(expenses)
-    .where(and(eq(expenses.id, rowId), eq(expenses.userId, userId)))
-    .limit(1);
+  const admin = createSupabaseAdminClient();
+  const existingResult = await admin
+    .from("expenses")
+    .select("*")
+    .eq("id", rowId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (existingResult.error) throw existingResult.error;
+  const [existing] = fromSupabaseRows<typeof expenses.$inferSelect>(
+    existingResult.data ? [existingResult.data] : [],
+  );
   if (!existing) return false;
-  await db
-    .delete(expenses)
-    .where(and(eq(expenses.id, rowId), eq(expenses.userId, userId)));
+  const deleteResult = await admin
+    .from("expenses")
+    .delete()
+    .eq("id", rowId)
+    .eq("user_id", userId);
+  if (deleteResult.error) throw deleteResult.error;
   await recomputeForDate(existing.instrumentId, existing.occurredAt);
   return true;
 }

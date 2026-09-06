@@ -17,7 +17,7 @@ import { yearBounds, periodKey } from "./periods";
 import type { CapPeriod } from "./periods";
 import { requireUserId } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { fromSupabaseRows } from "@/lib/supabase/rows";
+import { fromSupabaseRows, toSupabaseRow } from "@/lib/supabase/rows";
 
 function json<T>(raw: string, fallback: T): T {
   try {
@@ -133,61 +133,72 @@ async function refundMap(
  */
 export async function recomputeInstrumentYear(instrumentId: string, year: number) {
   const userId = await requireUserId();
-  const [inst] = await db
-    .select()
-    .from(instruments)
-    .where(eq(instruments.id, instrumentId))
-    .limit(1);
+  const admin = createSupabaseAdminClient();
+  const { start, end } = yearBounds(year);
+  const [instrumentResult, ruleResult, expenseResult] = await Promise.all([
+    admin.from("instruments").select("*").eq("id", instrumentId).maybeSingle(),
+    admin.from("reward_rules").select("*").eq("instrument_id", instrumentId),
+    admin
+      .from("expenses")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("instrument_id", instrumentId)
+      .gte("occurred_at", start)
+      .lte("occurred_at", end)
+      .order("occurred_at")
+      .order("created_at")
+      .order("id"),
+  ]);
+  const error = [instrumentResult, ruleResult, expenseResult]
+    .find((result) => result.error)?.error;
+  if (error) throw error;
+  const [inst] = fromSupabaseRows<Instrument>(
+    instrumentResult.data ? [instrumentResult.data] : [],
+  );
   if (!inst) return;
 
-  const rules = (await db
-    .select()
-    .from(rewardRules)
-    .where(eq(rewardRules.instrumentId, instrumentId)))
-    .map(toEngineRule);
-
-  const { start, end } = yearBounds(year);
-  const rows = await db
-    .select()
-    .from(expenses)
-    .where(
-      and(
-        eq(expenses.userId, userId),
-        eq(expenses.instrumentId, instrumentId),
-        gte(expenses.occurredAt, start),
-        lte(expenses.occurredAt, end),
-      ),
-    )
-    .orderBy(asc(expenses.occurredAt), asc(expenses.createdAt), asc(expenses.id));
+  const rules = fromSupabaseRows<RewardRule>(ruleResult.data).map(toEngineRule);
+  const rows = fromSupabaseRows<Expense>(expenseResult.data);
 
   const engineInst = toEngineInstrument(inst);
   const refunded = await refundMap(rows.map((r) => r.id), userId);
   const ledger = newCapLedger();
 
-  await db.transaction(async (tx) => {
-    for (const row of rows) {
-      const outcome = evaluateExpense(
-        engineInst,
-        rules,
-        toEngineExpense(row, refunded.get(row.id) ?? 0),
-        ledger,
-      );
-      const overridden = row.rewardOverridePaise != null;
-      await tx.update(expenses)
-        .set({
-          rewardRuleId: outcome.ruleId,
-          rewardUnitsMilli: outcome.unitsMilli,
-          rewardValuePaise: overridden
-            ? row.rewardOverridePaise!
-            : outcome.valuePaise,
-          rewardCappedUnitsMilli: outcome.cappedUnitsMilli,
-          rewardExplain: overridden
-            ? `Manual override · engine said ${outcome.explain}`
-            : outcome.explain,
-        })
-        .where(and(eq(expenses.id, row.id), eq(expenses.userId, userId)));
-    }
+  const updates = rows.map((row) => {
+    const outcome = evaluateExpense(
+      engineInst,
+      rules,
+      toEngineExpense(row, refunded.get(row.id) ?? 0),
+      ledger,
+    );
+    const overridden = row.rewardOverridePaise != null;
+    return {
+      id: row.id,
+      values: toSupabaseRow({
+        rewardRuleId: outcome.ruleId,
+        rewardUnitsMilli: outcome.unitsMilli,
+        rewardValuePaise: overridden
+          ? row.rewardOverridePaise!
+          : outcome.valuePaise,
+        rewardCappedUnitsMilli: outcome.cappedUnitsMilli,
+        rewardExplain: overridden
+          ? `Manual override - engine said ${outcome.explain}`
+          : outcome.explain,
+      }),
+    };
   });
+
+  const updateResults = await Promise.all(
+    updates.map(({ id, values }) =>
+      admin
+        .from("expenses")
+        .update(values)
+        .eq("id", id)
+        .eq("user_id", userId),
+    ),
+  );
+  const updateError = updateResults.find((result) => result.error)?.error;
+  if (updateError) throw updateError;
 }
 
 /** Recompute every card touched by a date, plus neighbours for safety. */
