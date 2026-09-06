@@ -44,6 +44,11 @@ export const expenseSchema = z
     },
   );
 
+// ExpenseSheet submits the complete record on edit. Keep a named edit schema
+// so the PATCH route never calls .partial() on a refined Zod object (Zod 4
+// throws while constructing that schema, before an API response can be made).
+export const expenseEditSchema = expenseSchema;
+
 export const adjustmentSchema = z.object({
   label: z.string().min(1, "Give this discount a name").max(120),
   kind: z

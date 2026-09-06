@@ -13,7 +13,7 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx src/db/seed-runner.ts",
     "typecheck": "tsc --noEmit --allowImportingTsExtensions",
-    "test": "tsx tests/engine.test.ts"
+    "test": "tsx tests/engine.test.ts && tsx tests/validation.test.ts"
   },
   "keywords": [],
   "author": "",

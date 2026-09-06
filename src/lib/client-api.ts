@@ -67,14 +67,37 @@ async function request<T>(
     window.clearTimeout(timeout);
     rest.signal?.removeEventListener("abort", abort);
   }
-  const payload = (await response.json().catch(() => null)) as
+  const responseText = await response.text();
+  let payload:
     | { ok: true; data: T }
     | { ok: false; error: string }
-    | null;
+    | null = null;
+  try {
+    payload = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    // Vercel proxy/platform failures can be HTML or plain text. Preserve the
+    // HTTP diagnostics below instead of replacing them with a generic toast.
+  }
   if (!response.ok || !payload || payload.ok === false) {
+    const apiMessage =
+      payload && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : null;
+    if (!apiMessage) {
+      console.error("LedgerKit API request failed", {
+        url,
+        method: rest.method ?? "GET",
+        status: response.status,
+        contentType: response.headers.get("content-type"),
+        vercelId: response.headers.get("x-vercel-id"),
+        response: responseText.slice(0, 500),
+      });
+    }
     throw new Error(
-      (payload && "error" in payload && payload.error) ||
-        "That did not go through. Try again.",
+      apiMessage ||
+        (response.status >= 500
+          ? `The server could not complete the request (${response.status}). Please try again.`
+          : `Request failed (${response.status}). Please try again.`),
     );
   }
   return payload.data;

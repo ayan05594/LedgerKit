@@ -164,7 +164,8 @@ export async function recomputeInstrumentYear(instrumentId: string, year: number
   const refunded = await refundMap(rows.map((r) => r.id), userId);
   const ledger = newCapLedger();
 
-  const updates = rows.map((row) => {
+  const updates: { id: string; values: Record<string, unknown> }[] = [];
+  for (const row of rows) {
     const outcome = evaluateExpense(
       engineInst,
       rules,
@@ -172,21 +173,36 @@ export async function recomputeInstrumentYear(instrumentId: string, year: number
       ledger,
     );
     const overridden = row.rewardOverridePaise != null;
-    return {
+    const rewardValuePaise = overridden
+      ? row.rewardOverridePaise!
+      : outcome.valuePaise;
+    const rewardExplain = overridden
+      ? `Manual override · engine said ${outcome.explain}`
+      : outcome.explain;
+
+    // Most edits do not change the reward earned by every other expense.
+    // Avoid turning a single save into dozens of unnecessary HTTP writes.
+    if (
+      row.rewardRuleId === outcome.ruleId &&
+      row.rewardUnitsMilli === outcome.unitsMilli &&
+      row.rewardValuePaise === rewardValuePaise &&
+      row.rewardCappedUnitsMilli === outcome.cappedUnitsMilli &&
+      row.rewardExplain === rewardExplain
+    ) {
+      continue;
+    }
+
+    updates.push({
       id: row.id,
       values: toSupabaseRow({
         rewardRuleId: outcome.ruleId,
         rewardUnitsMilli: outcome.unitsMilli,
-        rewardValuePaise: overridden
-          ? row.rewardOverridePaise!
-          : outcome.valuePaise,
+        rewardValuePaise,
         rewardCappedUnitsMilli: outcome.cappedUnitsMilli,
-        rewardExplain: overridden
-          ? `Manual override - engine said ${outcome.explain}`
-          : outcome.explain,
+        rewardExplain,
       }),
-    };
-  });
+    });
+  }
 
   const updateResults = await Promise.all(
     updates.map(({ id, values }) =>
