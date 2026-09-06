@@ -22,9 +22,9 @@ if (!databaseUrl) {
 function createSqlClient() {
   return postgres(databaseUrl!, {
     prepare: false,
-    // Each Vercel route can have many warm instances. One connection per
-    // instance prevents a cold page from opening a burst of pooler sockets.
-    max: 1,
+    // Keep the remaining write/query path small while allowing a second
+    // connection when one pooler socket is slow to establish.
+    max: 2,
     idle_timeout: 5,
     connect_timeout: 3,
     max_lifetime: 30,

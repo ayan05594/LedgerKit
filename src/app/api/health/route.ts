@@ -1,8 +1,5 @@
-import { count, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db } from "@/db/client";
-import { categories, expenses, instruments, settings } from "@/db/schema";
-import { runDatabaseRead } from "@/lib/api";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -10,30 +7,32 @@ export const runtime = "nodejs";
 export async function GET() {
   const startedAt = Date.now();
   try {
-    const [[categoryCount], [instrumentCount], [expenseCount], [seedMarker]] =
-      await runDatabaseRead(() =>
-        Promise.all([
-          db.select({ value: count() }).from(categories),
-          db.select({ value: count() }).from(instruments),
-          db.select({ value: count() }).from(expenses),
-          db
-            .select({ key: settings.key })
-            .from(settings)
-            .where(eq(settings.key, "seeded_at"))
-            .limit(1),
-        ]),
-      );
+    const admin = createSupabaseAdminClient();
+    const [categoryResult, instrumentResult, expenseResult, seedResult] =
+      await Promise.all([
+        admin.from("categories").select("id", { count: "exact", head: true }),
+        admin.from("instruments").select("id", { count: "exact", head: true }),
+        admin.from("expenses").select("id", { count: "exact", head: true }),
+        admin.from("settings").select("key").eq("key", "seeded_at").limit(1),
+      ]);
+    const error =
+      categoryResult.error ??
+      instrumentResult.error ??
+      expenseResult.error ??
+      seedResult.error;
+    if (error) throw error;
 
     return NextResponse.json({
       ok: true,
       version: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local",
       region: process.env.VERCEL_REGION ?? "local",
       database: "connected",
-      referenceReady: Boolean(seedMarker),
+      transport: "supabase-data-api",
+      referenceReady: Boolean(seedResult.data?.length),
       counts: {
-        categories: categoryCount?.value ?? 0,
-        cards: instrumentCount?.value ?? 0,
-        expenses: expenseCount?.value ?? 0,
+        categories: categoryResult.count ?? 0,
+        cards: instrumentResult.count ?? 0,
+        expenses: expenseResult.count ?? 0,
       },
       responseTimeMs: Date.now() - startedAt,
     });
