@@ -17,6 +17,7 @@ import type {
 import { computeExpenseMath, sumMath, type ExpenseMath } from "@/lib/derive";
 import { monthBounds } from "@/lib/rewards/periods";
 import { capsForInstruments } from "@/lib/rewards/recompute";
+import { rewardAutomationEnabled } from "@/lib/rewards/coverage";
 import type { CapStatus } from "@/lib/rewards/engine";
 import { requireUserId } from "@/lib/auth";
 import {
@@ -49,37 +50,106 @@ export interface Reference {
   rules: RewardRule[];
 }
 
+/**
+ * The service-role client bypasses RLS, so every taxonomy read must explicitly
+ * include only shared system rows or rows owned by the authenticated user.
+ * Supabase Auth user IDs are UUIDs and therefore safe in this PostgREST filter.
+ */
+function accessibleTaxonomyFilter(userId: string) {
+  return `is_system.eq.true,owner_user_id.eq.${userId}`;
+}
+
+function accessibleInstrumentFilter(userId: string) {
+  return `is_catalog_card.eq.true,owner_user_id.eq.${userId}`;
+}
+
 export async function getReference(
   authenticatedUserId?: string,
 ): Promise<Reference> {
+  const userId = authenticatedUserId ?? await requireUserId();
   const admin = createSupabaseAdminClient();
+  const selectionResult = await admin
+    .from("user_card_selections")
+    .select("instrument_id")
+    .eq("user_id", userId);
+  if (selectionResult.error) throw selectionResult.error;
+  const accessibleInstrumentIds = [
+    ...new Set(
+      (selectionResult.data ?? [])
+        .map((row) => row.instrument_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  ];
   const results = await Promise.all([
-    admin.from("categories").select("*").eq("archived", false).order("sort_order"),
-    admin.from("merchants").select("*").order("name"),
-    admin.from("payment_apps").select("*").order("sort_order"),
-    admin.from("instruments").select("*").eq("archived", false).order("sort_order"),
-    admin.from("accounts").select("*").eq("archived", false).order("sort_order"),
-    authenticatedUserId
+    admin
+      .from("categories")
+      .select("*")
+      .or(accessibleTaxonomyFilter(userId))
+      .eq("archived", false)
+      .order("sort_order"),
+    admin
+      .from("merchants")
+      .select("*")
+      .or(accessibleTaxonomyFilter(userId))
+      .order("name"),
+    admin
+      .from("payment_apps")
+      .select("*")
+      .or(accessibleTaxonomyFilter(userId))
+      .order("sort_order"),
+    accessibleInstrumentIds.length
       ? admin
-          .from("people")
+          .from("instruments")
           .select("*")
-          .eq("user_id", authenticatedUserId)
-          .eq("archived", false)
-          .order("name")
+          .in("id", accessibleInstrumentIds)
+          .or(accessibleInstrumentFilter(userId))
+          .order("sort_order")
       : Promise.resolve({ data: [], error: null }),
-    admin.from("reward_rules").select("*").order("priority", { ascending: false }),
+    admin
+      .from("accounts")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("archived", false)
+      .order("sort_order"),
+    admin
+      .from("people")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("archived", false)
+      .order("name"),
+    accessibleInstrumentIds.length
+      ? admin
+          .from("reward_rules")
+          .select("*")
+          .in("instrument_id", accessibleInstrumentIds)
+          .order("priority", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
   ]);
   const error = results.find((result) => result.error)?.error;
   if (error) throw error;
-  const [categoryResult, merchantResult, appResult, instrumentResult, accountResult, peopleResult, ruleResult] = results;
+  const [
+    categoryResult,
+    merchantResult,
+    appResult,
+    instrumentResult,
+    accountResult,
+    peopleResult,
+    ruleResult,
+  ] = results;
+  const instrumentRows = fromSupabaseRows<Instrument>(instrumentResult.data);
+  const automatedInstrumentIds = new Set(
+    instrumentRows.filter(rewardAutomationEnabled).map(({ id }) => id),
+  );
   return {
     categories: fromSupabaseRows<Category>(categoryResult.data),
     merchants: fromSupabaseRows<Merchant>(merchantResult.data),
     apps: fromSupabaseRows<PaymentApp>(appResult.data),
-    instruments: fromSupabaseRows<Instrument>(instrumentResult.data),
+    instruments: instrumentRows,
     accounts: fromSupabaseRows<Account>(accountResult.data),
     people: fromSupabaseRows<Person>(peopleResult.data),
-    rules: fromSupabaseRows<RewardRule>(ruleResult.data),
+    rules: fromSupabaseRows<RewardRule>(ruleResult.data).filter((rule) =>
+      automatedInstrumentIds.has(rule.instrumentId),
+    ),
   };
 }
 
@@ -112,22 +182,54 @@ async function hydrate(
 ): Promise<ExpenseRow[]> {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
+  const instrumentIds = [
+    ...new Set(rows.map((row) => row.instrumentId).filter(Boolean)),
+  ] as string[];
+  const accountIds = [
+    ...new Set(rows.map((row) => row.accountId).filter(Boolean)),
+  ] as string[];
+  const categorySlugs = [...new Set(rows.map((row) => row.categorySlug))];
+  const appSlugs = [
+    ...new Set(rows.map((row) => row.paymentAppSlug).filter(Boolean)),
+  ] as string[];
   const admin = createSupabaseAdminClient();
   const results = await Promise.all([
     admin.from("adjustments").select("*").eq("user_id", userId).in("expense_id", ids),
     admin.from("refunds").select("*").eq("user_id", userId).in("expense_id", ids),
     reference?.instruments
       ? Promise.resolve({ data: reference.instruments, error: null, mapped: true })
-      : admin.from("instruments").select("*"),
+      : instrumentIds.length
+        ? admin
+            .from("instruments")
+            .select("*")
+            .in("id", instrumentIds)
+            .or(accessibleInstrumentFilter(userId))
+        : Promise.resolve({ data: [], error: null }),
     reference?.accounts
       ? Promise.resolve({ data: reference.accounts, error: null, mapped: true })
-      : admin.from("accounts").select("*"),
+      : accountIds.length
+        ? admin
+            .from("accounts")
+            .select("*")
+            .in("id", accountIds)
+            .eq("user_id", userId)
+        : Promise.resolve({ data: [], error: null }),
     reference?.categories
       ? Promise.resolve({ data: reference.categories, error: null, mapped: true })
-      : admin.from("categories").select("*"),
+      : admin
+          .from("categories")
+          .select("*")
+          .in("slug", categorySlugs)
+          .or(accessibleTaxonomyFilter(userId)),
     reference?.apps
       ? Promise.resolve({ data: reference.apps, error: null, mapped: true })
-      : admin.from("payment_apps").select("*"),
+      : appSlugs.length
+        ? admin
+            .from("payment_apps")
+            .select("*")
+            .in("slug", appSlugs)
+            .or(accessibleTaxonomyFilter(userId))
+        : Promise.resolve({ data: [], error: null }),
   ]);
   const error = results.find((result) => result.error)?.error;
   if (error) throw error;
@@ -300,7 +402,7 @@ export async function getMonthSummary(
   const admin = createSupabaseAdminClient();
   const [
     expenseResult,
-    instrumentResult,
+    selectionResult,
     accountResult,
     categoryResult,
     appResult,
@@ -315,10 +417,24 @@ export async function getMonthSummary(
       .order("occurred_at", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(20000),
-    admin.from("instruments").select("*").eq("archived", false).order("sort_order"),
-    admin.from("accounts").select("*").eq("archived", false).order("sort_order"),
-    admin.from("categories").select("*"),
-    admin.from("payment_apps").select("*"),
+    admin
+      .from("user_card_selections")
+      .select("instrument_id")
+      .eq("user_id", userId),
+    admin
+      .from("accounts")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("archived", false)
+      .order("sort_order"),
+    admin
+      .from("categories")
+      .select("*")
+      .or(accessibleTaxonomyFilter(userId)),
+    admin
+      .from("payment_apps")
+      .select("*")
+      .or(accessibleTaxonomyFilter(userId)),
     admin
       .from("transfers")
       .select("*")
@@ -328,7 +444,7 @@ export async function getMonthSummary(
   ]);
   const loadError = [
     expenseResult,
-    instrumentResult,
+    selectionResult,
     accountResult,
     categoryResult,
     appResult,
@@ -336,11 +452,50 @@ export async function getMonthSummary(
   ].find((result) => result.error)?.error;
   if (loadError) throw loadError;
   const expenseRows = fromSupabaseRows<Expense>(expenseResult.data);
-  const allInstruments = fromSupabaseRows<Instrument>(instrumentResult.data);
-  const allAccounts = fromSupabaseRows<Account>(accountResult.data);
-  const catRows = fromSupabaseRows<Category>(categoryResult.data);
-  const appRows = fromSupabaseRows<PaymentApp>(appResult.data);
+  const ownedAccounts = fromSupabaseRows<Account>(accountResult.data);
+  const accessibleCategories = fromSupabaseRows<Category>(categoryResult.data);
+  const accessibleApps = fromSupabaseRows<PaymentApp>(appResult.data);
   const monthTransfers = fromSupabaseRows<Transfer>(transferResult.data);
+  const selectedInstrumentIds = new Set(
+    (selectionResult.data ?? []).map((row) => String(row.instrument_id)),
+  );
+  const hydrationInstrumentIds = [
+    ...new Set([
+      ...selectedInstrumentIds,
+      ...expenseRows
+        .map((expense) => expense.instrumentId)
+        .filter((id): id is string => Boolean(id)),
+    ]),
+  ];
+  const instrumentResult = hydrationInstrumentIds.length
+    ? await admin
+        .from("instruments")
+        .select("*")
+        .in("id", hydrationInstrumentIds)
+        .or(accessibleInstrumentFilter(userId))
+        .order("sort_order")
+    : { data: [], error: null };
+  if (instrumentResult.error) throw instrumentResult.error;
+  const allInstruments = fromSupabaseRows<Instrument>(instrumentResult.data);
+  // Unknown legacy references deliberately remain unresolved. The expense
+  // mapper renders its existing fallback labels instead of reading another
+  // user's pre-ownership account or custom taxonomy row.
+  const allAccounts = ownedAccounts;
+  const catRows = accessibleCategories;
+  const appRows = accessibleApps;
+  const visibleInstrumentIds = new Set(selectedInstrumentIds);
+  for (const expense of expenseRows) {
+    if (
+      expense.instrumentId &&
+      expense.occurredAt >= start &&
+      expense.occurredAt <= end
+    ) {
+      visibleInstrumentIds.add(expense.instrumentId);
+    }
+  }
+  const visibleInstruments = allInstruments.filter((instrument) =>
+    visibleInstrumentIds.has(instrument.id),
+  );
   const [hydratedRows, capsByInstrument] = await Promise.all([
     hydrate(expenseRows, userId, {
       instruments: allInstruments,
@@ -348,7 +503,7 @@ export async function getMonthSummary(
       categories: catRows,
       apps: appRows,
     }),
-    capsForInstruments(allInstruments, end, userId),
+    capsForInstruments(visibleInstruments, end, userId),
   ]);
   const rows = hydratedRows.filter(
     (row) =>
@@ -365,7 +520,7 @@ export async function getMonthSummary(
   ).netSpendPaise;
 
   /* cards */
-  const cards: CardSummary[] = allInstruments.map((instrument) => {
+  const cards: CardSummary[] = visibleInstruments.map((instrument) => {
     const mine = rows.filter((r) => r.expense.instrumentId === instrument.id);
     return {
       instrument,
@@ -742,21 +897,45 @@ export async function getPending(): Promise<PendingSummary> {
 /* ----------------------------------------------------------------- cards */
 
 export async function getInstrumentDetail(id: string) {
+  const userId = await requireUserId();
   const admin = createSupabaseAdminClient();
-  const [instrumentResult, ruleResult] = await Promise.all([
-    admin.from("instruments").select("*").eq("id", id).limit(1),
+  const [selectionResult, historyResult, instrumentResult] = await Promise.all([
     admin
+      .from("user_card_selections")
+      .select("instrument_id")
+      .eq("user_id", userId)
+      .eq("instrument_id", id)
+      .maybeSingle(),
+    admin
+      .from("expenses")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("instrument_id", id)
+      .limit(1),
+    admin
+      .from("instruments")
+      .select("*")
+      .eq("id", id)
+      .or(accessibleInstrumentFilter(userId))
+      .limit(1),
+  ]);
+  if (selectionResult.error) throw selectionResult.error;
+  if (historyResult.error) throw historyResult.error;
+  if (!selectionResult.data && !historyResult.data?.length) return null;
+  if (instrumentResult.error) throw instrumentResult.error;
+  const [instrument] = fromSupabaseRows<Instrument>(instrumentResult.data);
+  if (!instrument) return null;
+  let rules: RewardRule[] = [];
+  if (rewardAutomationEnabled(instrument)) {
+    const ruleResult = await admin
       .from("reward_rules")
       .select("*")
       .eq("instrument_id", id)
       .order("priority", { ascending: false })
-      .order("name"),
-  ]);
-  if (instrumentResult.error) throw instrumentResult.error;
-  if (ruleResult.error) throw ruleResult.error;
-  const [instrument] = fromSupabaseRows<Instrument>(instrumentResult.data);
-  if (!instrument) return null;
-  const rules = fromSupabaseRows<RewardRule>(ruleResult.data);
+      .order("name");
+    if (ruleResult.error) throw ruleResult.error;
+    rules = fromSupabaseRows<RewardRule>(ruleResult.data);
+  }
   return { instrument, rules };
 }
 

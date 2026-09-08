@@ -31,10 +31,14 @@ export function CategoryPicker({
   categories,
   value,
   onChange,
+  id,
+  labelledBy,
 }: {
   categories: Category[];
   value: string;
   onChange: (slug: string) => void;
+  id?: string;
+  labelledBy?: string;
 }) {
   const [query, setQuery] = React.useState("");
 
@@ -48,9 +52,17 @@ export function CategoryPicker({
   }, [categories, query]);
 
   return (
-    <div className="rounded-[11px] border border-rule-strong bg-surface">
+    <div
+      id={id}
+      role="group"
+      aria-labelledby={labelledBy}
+      className="rounded-[11px] border border-rule-strong bg-surface"
+    >
       <div className="border-b border-rule p-2">
         <Input
+          id={id ? `${id}-search` : undefined}
+          name="categorySearch"
+          aria-label="Search expense categories"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search categories"
@@ -128,6 +140,7 @@ function CategoryChip({
     <button
       type="button"
       onClick={() => onSelect(category.slug)}
+      aria-pressed={selected}
       data-selected={selected}
       className={cn(
         "flex items-center gap-1.5 rounded-[8px] border px-2 py-1.5 text-[0.8125rem] font-medium transition-colors",

@@ -5,11 +5,9 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft,
+  ExternalLink,
   Info,
-  Pencil,
-  Plus,
   Sparkles,
-  Trash2,
 } from "lucide-react";
 import {
   Bar,
@@ -22,15 +20,14 @@ import { useReducedMotion } from "motion/react";
 import type { RewardRule } from "@/db/schema";
 import {
   useCreateRule,
-  useDeleteRule,
   useInstrument,
   useReference,
   useSummary,
-  useUpdateInstrument,
   useUpdateRule,
 } from "@/lib/client-api";
 import { formatMoney, formatMoneyShort, percentFromBps, toPaise } from "@/lib/money";
 import { monthName } from "@/lib/rewards/periods";
+import { rewardAutomationEnabled } from "@/lib/rewards/coverage";
 import { CapMeter } from "@/components/dashboard/card-tile";
 import {
   Button,
@@ -70,11 +67,6 @@ export default function CardDetailPage() {
   } = useInstrument(id, year);
   const { data: summaryData } = useSummary(year, now.getMonth() + 1);
   const { data: reference } = useReference();
-  const updateInstrument = useUpdateInstrument();
-  const createRule = useCreateRule();
-
-  const [editingRule, setEditingRule] = React.useState<RewardRule | null>(null);
-  const [ruleDialogOpen, setRuleDialogOpen] = React.useState(false);
   const reduce = useReducedMotion();
 
   if (error) {
@@ -104,10 +96,9 @@ export default function CardDetailPage() {
   );
   const perks = safeJson<string[]>(instrument.perks, []);
   const excluded = safeJson<string[]>(instrument.excludedCategories, []);
-  const options = safeJson<Record<string, unknown>>(instrument.options, {});
-  const cardFlags = Array.isArray(options.flags)
-    ? (options.flags as { key: string; label: string; hint?: string; default: boolean }[])
-    : [];
+  const sourceNote = readableSourceNote(instrument.sourceNote);
+  const rewardIsCalculable = rewardAutomationEnabled(instrument);
+  const rewardIsEstimate = instrument.rewardCoverage === "partial";
 
   return (
     <div className="space-y-4">
@@ -143,19 +134,38 @@ export default function CardDetailPage() {
             </p>
           </div>
           <div>
-            <p className="text-[0.6875rem] text-white/65">earned back</p>
+            <p className="text-[0.6875rem] text-white/65">
+              {rewardIsCalculable
+                ? rewardIsEstimate
+                  ? "estimated back"
+                  : "earned back"
+                : "reward tracking"}
+            </p>
             <p className="figure text-[1.375rem]">
-              {formatMoneyShort(cardSummary?.rewardValuePaise ?? 0)}
+              {rewardIsCalculable
+                ? formatMoneyShort(cardSummary?.rewardValuePaise ?? 0)
+                : "Manual"}
             </p>
           </div>
         </div>
       </div>
 
-      {instrument.sourceNote && (
+      {sourceNote && (
         <div className="flex gap-2.5 rounded-[11px] border border-accent/20 bg-accent-soft p-3">
           <Info className="mt-0.5 size-4 shrink-0 text-accent" />
           <p className="text-[0.8125rem] leading-relaxed text-ink-2">
-            {instrument.sourceNote}
+            {sourceNote}
+          </p>
+        </div>
+      )}
+
+      {rewardIsEstimate && (
+        <div className="flex gap-2.5 rounded-[11px] border border-warn/25 bg-warn-soft p-3 text-warn">
+          <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <p className="text-[0.8125rem] leading-relaxed">
+            Partial reward coverage: LedgerKit can calculate the supported rules,
+            but every figure on this page is an estimate. Confirm final rewards and
+            exclusions against your issuer statement.
           </p>
         </div>
       )}
@@ -165,26 +175,22 @@ export default function CardDetailPage() {
         <div className="space-y-4">
           <Panel
             title="Reward rules"
-            subtitle="Checked most specific first. Edit any of these to match your statement."
-            bodyClassName="p-0"
-            action={
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  setEditingRule(null);
-                  setRuleDialogOpen(true);
-                }}
-              >
-                <Plus className="size-3.5" />
-                Add rule
-              </Button>
+            subtitle={
+              instrument.isCatalogCard
+                ? rewardIsEstimate
+                  ? "Supported rules are checked most specific first. Results are estimates; official catalogue rules are read-only."
+                  : "Checked most specific first. Official catalogue rules are read-only."
+                : "This private card stays manual. Enter the reward shown on your statement when you log each expense."
             }
+            bodyClassName="p-0"
           >
             {rules.length === 0 ? (
               <p className="px-4 py-8 text-center text-[0.8438rem] text-ink-2">
-                This card has no standing reward programme. Log offers on individual
-                expenses instead.
+                {instrument.isCatalogCard
+                  ? rewardIsCalculable
+                    ? "No supported reward rules are available for this card yet."
+                    : "LedgerKit has not automated this card's current reward terms yet. Use the official source below before relying on a reward figure."
+                  : "No automated rules are attached to user-added cards, so LedgerKit will never invent a rate for this card."}
               </p>
             ) : (
               <ul className="divide-y divide-rule">
@@ -193,10 +199,6 @@ export default function CardDetailPage() {
                     key={rule.id}
                     rule={rule}
                     rewardUnit={instrument.rewardUnit}
-                    onEdit={() => {
-                      setEditingRule(rule);
-                      setRuleDialogOpen(true);
-                    }}
                   />
                 ))}
               </ul>
@@ -204,6 +206,7 @@ export default function CardDetailPage() {
           </Panel>
 
           <Panel title="Rewards through the year" bodyClassName="p-4">
+            {rewardIsCalculable ? (
             <div className="h-[168px] w-full">
               <ResponsiveContainer>
                 <BarChart data={trend} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
@@ -225,7 +228,8 @@ export default function CardDetailPage() {
                         <div className="rounded-lg bg-ink px-2.5 py-1.5 text-xs text-white">
                           <div>{monthName(p.month, true)}</div>
                           <div className="tnum">
-                            {formatMoney(p.rewardPaise)} earned
+                            {formatMoney(p.rewardPaise)}{" "}
+                            {rewardIsEstimate ? "estimated" : "earned"}
                           </div>
                           <div className="tnum text-white/60">
                             on {formatMoney(p.netPaise)}
@@ -243,6 +247,14 @@ export default function CardDetailPage() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            ) : (
+              <div className="flex min-h-[168px] items-center justify-center px-4 text-center">
+                <p className="max-w-[48ch] text-[0.8125rem] leading-relaxed text-ink-2">
+                  Reward totals are hidden until this card's caps, exclusions and
+                  redemption value have been encoded from current issuer terms.
+                </p>
+              </div>
+            )}
           </Panel>
         </div>
 
@@ -266,137 +278,101 @@ export default function CardDetailPage() {
               </div>
               {cardSummary.rewardLostPaise > 0 && (
                 <p className="mt-3 rounded-[9px] bg-warn-soft px-2.5 py-2 text-[0.75rem] text-warn">
-                  {formatMoney(cardSummary.rewardLostPaise)} of reward was lost this
-                  month because caps were already full.
+                  {formatMoney(cardSummary.rewardLostPaise)} of reward was
+                  {rewardIsEstimate ? " estimated to be " : " "}lost this month
+                  because caps were already full.
                 </p>
               )}
             </Panel>
           )}
 
-          <Panel title="Card settings">
-            <div className="space-y-3">
-              {cardFlags.length > 0 && (
-                <div className="space-y-2.5">
-                  {cardFlags.map((flag) => (
-                    <label
-                      key={flag.key}
-                      className="flex items-center justify-between gap-3"
-                    >
-                      <span className="text-[0.8438rem]">
-                        {flag.label} by default
-                        <span className="mt-0.5 block text-[0.75rem] text-ink-3">
-                          Pre-fills the question on each new expense. Past expenses
-                          keep the answer you gave at the time.
-                        </span>
-                      </span>
-                      <Switch
-                        checked={!!flag.default}
-                        onCheckedChange={(v) =>
-                          updateInstrument.mutate({
-                            id,
-                            options: {
-                              ...options,
-                              flags: cardFlags.map((f) =>
-                                f.key === flag.key ? { ...f, default: v } : f,
-                              ),
-                            },
-                          })
-                        }
-                      />
-                    </label>
-                  ))}
+          {instrument.isCatalogCard ? (
+            <Panel title="Verified card information">
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-4 text-[0.8125rem]">
+                <div>
+                  <dt className="text-ink-3">Annual fee</dt>
+                  <dd className="mt-0.5 font-semibold text-ink">
+                    {knownFee(instrument.annualFeeKnown, instrument.annualFeePaise)}
+                  </dd>
                 </div>
+                <div>
+                  <dt className="text-ink-3">Joining fee</dt>
+                  <dd className="mt-0.5 font-semibold text-ink">
+                    {knownFee(instrument.joiningFeeKnown, instrument.joiningFeePaise)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Forex markup</dt>
+                  <dd className="mt-0.5 font-semibold text-ink">
+                    {instrument.rewardCoverage === "exact"
+                      ? percentFromBps(instrument.forexMarkupBps)
+                      : "Check issuer terms"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Reward automation</dt>
+                  <dd className="mt-0.5 font-semibold capitalize text-ink">
+                    {rewardIsEstimate
+                      ? "Partial — estimates only"
+                      : rewardIsCalculable
+                        ? "Automated"
+                        : "Manual"}
+                  </dd>
+                </div>
+              </dl>
+              {instrument.feeNote && (
+                <p className="mt-4 rounded-[9px] bg-sunken px-2.5 py-2 text-[0.75rem] leading-relaxed text-ink-2">
+                  {instrument.feeNote}
+                </p>
               )}
-
-              <Field label="Statement day" hint="Used for statement-cycle caps">
-                <Input
-                  type="number"
-                  min={1}
-                  max={28}
-                  defaultValue={instrument.statementDay}
-                  onBlur={(e) =>
-                    updateInstrument.mutate({
-                      id,
-                      statementDay: Number(e.target.value),
-                    })
-                  }
-                />
-              </Field>
-
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Card-wide cap" hint={instrument.rewardUnit}>
-                  <Input
-                    type="number"
-                    defaultValue={instrument.overallCapUnits ?? ""}
-                    placeholder="none"
-                    onBlur={(e) =>
-                      updateInstrument.mutate({
-                        id,
-                        overallCapUnits: e.target.value
-                          ? Number(e.target.value)
-                          : null,
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="Cap resets">
-                  <Select
-                    defaultValue={instrument.overallCapPeriod}
-                    onChange={(e) =>
-                      updateInstrument.mutate({
-                        id,
-                        overallCapPeriod: e.target.value,
-                      })
-                    }
+              <div className="mt-4 border-t border-rule pt-3">
+                <p className="text-[0.75rem] leading-relaxed text-ink-3">
+                  Verified {instrument.verifiedAt || "date not recorded"} from the
+                  issuer&rsquo;s published information. Issuers can change terms
+                  without notice.
+                </p>
+                {instrument.officialUrl && (
+                  <a
+                    className="mt-2 inline-flex items-center gap-1.5 text-[0.8125rem] font-semibold text-accent hover:text-ink"
+                    href={instrument.officialUrl}
+                    target="_blank"
+                    rel="noreferrer"
                   >
-                    <option value="none">No cap</option>
-                    <option value="month">Monthly</option>
-                    <option value="quarter">Quarterly</option>
-                    <option value="year">Yearly</option>
-                    <option value="statement">Per statement</option>
-                  </Select>
-                </Field>
+                    Check official card page
+                    <ExternalLink className="size-3.5" />
+                    <span className="sr-only"> (opens in a new tab)</span>
+                  </a>
+                )}
               </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Annual fee">
-                  <Input
-                    inputMode="decimal"
-                    defaultValue={instrument.annualFeePaise / 100}
-                    onBlur={(e) =>
-                      updateInstrument.mutate({
-                        id,
-                        annualFeePaise: toPaise(e.target.value),
-                      })
-                    }
-                    className="tnum"
-                  />
-                </Field>
-                <Field label="Forex markup %">
-                  <Input
-                    inputMode="decimal"
-                    defaultValue={instrument.forexMarkupBps / 100}
-                    onBlur={(e) =>
-                      updateInstrument.mutate({
-                        id,
-                        forexMarkupBps: Math.round(Number(e.target.value) * 100),
-                      })
-                    }
-                    className="tnum"
-                  />
-                </Field>
-              </div>
-
-              <Field label="Notes on this card's terms">
-                <Textarea
-                  defaultValue={instrument.sourceNote}
-                  onBlur={(e) =>
-                    updateInstrument.mutate({ id, sourceNote: e.target.value })
-                  }
-                />
-              </Field>
-            </div>
-          </Panel>
+            </Panel>
+          ) : (
+            <Panel title="Private manual card">
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-4 text-[0.8125rem]">
+                <div>
+                  <dt className="text-ink-3">Issuer</dt>
+                  <dd className="mt-0.5 font-semibold text-ink">{instrument.issuer}</dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Network</dt>
+                  <dd className="mt-0.5 font-semibold uppercase text-ink">
+                    {instrument.network}
+                  </dd>
+                </div>
+              </dl>
+              <p className="mt-4 rounded-[9px] bg-sunken px-2.5 py-2 text-[0.75rem] leading-relaxed text-ink-2">
+                This card is visible only in your account. Its rates and fees are
+                intentionally not inferred. Enter statement-confirmed rewards on
+                each expense, and manage whether the card appears in your wallet
+                from Settings.
+              </p>
+              <Link
+                href="/settings#my-cards"
+                className="mt-3 inline-flex text-[0.8125rem] font-semibold text-accent hover:text-ink"
+              >
+                Manage wallet in Settings
+              </Link>
+            </Panel>
+          )}
 
           {perks.length > 0 && (
             <Panel title="Perks">
@@ -434,13 +410,6 @@ export default function CardDetailPage() {
         </div>
       </div>
 
-      <RuleDialog
-        open={ruleDialogOpen}
-        onOpenChange={setRuleDialogOpen}
-        instrumentId={id}
-        rewardUnit={instrument.rewardUnit}
-        rule={editingRule}
-      />
     </div>
   );
 }
@@ -450,14 +419,10 @@ export default function CardDetailPage() {
 function RuleRow({
   rule,
   rewardUnit,
-  onEdit,
 }: {
   rule: RewardRule;
   rewardUnit: string;
-  onEdit: () => void;
 }) {
-  const updateRule = useUpdateRule();
-  const deleteRule = useDeleteRule();
   const merchants = safeJson<string[]>(rule.matchMerchants, []);
   const apps = safeJson<string[]>(rule.matchApps, []);
   const cats = safeJson<string[]>(rule.matchCategories, []);
@@ -513,24 +478,6 @@ function RuleRow({
             {rule.notes}
           </p>
         )}
-      </div>
-
-      <div className="flex shrink-0 items-center gap-1 self-end sm:self-start">
-        <Switch
-          checked={rule.active}
-          onCheckedChange={(v) => updateRule.mutate({ id: rule.id, active: v })}
-        />
-        <Button variant="ghost" size="icon" aria-label="Edit rule" onClick={onEdit}>
-          <Pencil className="size-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Delete rule"
-          onClick={() => deleteRule.mutate(rule.id)}
-        >
-          <Trash2 className="size-3.5 text-alert" />
-        </Button>
       </div>
     </li>
   );
@@ -782,4 +729,18 @@ function safeJson<T>(raw: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function readableSourceNote(raw: string) {
+  if (!raw) return "";
+  const parsed = safeJson<unknown>(raw, raw);
+  if (Array.isArray(parsed)) {
+    return parsed.filter((value): value is string => typeof value === "string").join(" ");
+  }
+  return typeof parsed === "string" ? parsed : raw;
+}
+
+function knownFee(known: boolean, amountPaise: number) {
+  if (!known) return "Check issuer terms";
+  return amountPaise === 0 ? "No fee" : formatMoney(amountPaise);
 }

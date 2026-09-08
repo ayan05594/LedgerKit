@@ -1,6 +1,11 @@
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { eq, inArray } from "drizzle-orm";
 import {
-  accounts,
+  CREDIT_CARD_CATALOG_VERSION,
+  CREDIT_CARD_INSTRUMENT_SEEDS,
+  PARTIAL_REWARD_CARD_IDS,
+} from "../data/credit-card-seed";
+import {
   categories,
   instruments,
   merchants,
@@ -12,7 +17,9 @@ import {
 type DB = PostgresJsDatabase<Record<string, unknown>>;
 
 const R = (rupees: number) => Math.round(rupees * 100);
-
+const CATALOG_INSTRUMENT_IDS = new Set(
+  CREDIT_CARD_INSTRUMENT_SEEDS.map((row) => row.id),
+);
 /* ------------------------------------------------------------- categories */
 
 interface Cat {
@@ -242,7 +249,6 @@ interface CardSeed {
   kind: "credit" | "debit" | "prepaid";
   colorFrom: string;
   colorTo: string;
-  accountId?: string;
   statementDay?: number;
   dueDay?: number;
   rewardUnit: string;
@@ -291,34 +297,7 @@ export const CARDS: CardSeed[] = [
     ],
     sourceNote:
       "Rates reflect the June 2025 revision: Myntra rose to 7.5% and per-merchant quarterly caps of ₹4,000 were introduced on Flipkart, Myntra and Cleartrip.",
-    rules: [
-      {
-        id: "fka-myntra", name: "Myntra", matchMerchants: ["myntra"],
-        rateBps: 750, capUnits: 4000, capPeriod: "quarter", capGroup: "fka-myntra",
-        notes: "₹4,000 a quarter — roughly ₹53,000 of Myntra spend.",
-      },
-      {
-        id: "fka-flipkart", name: "Flipkart", matchMerchants: ["flipkart"],
-        rateBps: 500, capUnits: 4000, capPeriod: "quarter", capGroup: "fka-flipkart",
-        notes: "Separate ₹4,000 quarterly cap. Excludes gift cards, gold and jewellery.",
-      },
-      {
-        id: "fka-cleartrip", name: "Cleartrip", matchMerchants: ["cleartrip"],
-        rateBps: 500, capUnits: 4000, capPeriod: "quarter", capGroup: "fka-cleartrip",
-        notes: "Its own ₹4,000 quarterly bucket.",
-      },
-      {
-        id: "fka-partners", name: "Preferred partners",
-        matchMerchants: ["swiggy", "uber", "pvr", "cultfit"],
-        rateBps: 400, capUnits: null, capPeriod: "none",
-        notes: "Swiggy, Uber, PVR INOX and cult.fit — uncapped.",
-      },
-      {
-        id: "fka-base", name: "Everything else", isBase: true,
-        rateBps: 100, capUnits: null, capPeriod: "none",
-        notes: "1% on all other eligible spends, uncapped.",
-      },
-    ],
+    rules: [],
   },
 
   {
@@ -335,7 +314,9 @@ export const CARDS: CardSeed[] = [
     rewardUnit: "CashPoints",
     unitValuePaise: 100,
     rewardKind: "points",
-    excludedCategories: [...NO_EARN_COMMON],
+    excludedCategories: [
+      "fuel", "rent", "taxes", "credit-card-bill", "wallet-load", "emi",
+    ],
     annualFeePaise: R(1000),
     feeWaiverSpendPaise: R(100000),
     forexMarkupBps: 350,
@@ -357,6 +338,7 @@ export const CARDS: CardSeed[] = [
       {
         id: "mcc-partners", name: "Ten partner brands",
         matchMerchants: HDFC_PARTNERS,
+        excludeCategories: ["gift-cards"],
         rateBps: 500, capUnits: 1000, capPeriod: "month", capGroup: "mcc-accelerated",
         notes: "Amazon, BookMyShow, cult.fit, Flipkart, Myntra, Sony LIV, Swiggy, Tata CLiQ, Uber, Zomato.",
       },
@@ -407,32 +389,7 @@ export const CARDS: CardSeed[] = [
     ],
     sourceNote:
       "The Amazon rate depends on Prime: 5% with it, 3% without. You answer that on each expense, so a lapsed or renewed membership does not rewrite what you already earned. The card page sets which way the question is pre-filled. A 1% fee applies to Amazon Pay wallet loads of ₹5,000 or more from 15 January 2026.",
-    rules: [
-      {
-        id: "api-amazon", name: "Amazon.in with Prime",
-        matchMerchants: ["amazon", "prime-video"],
-        rateBps: 500, capUnits: null, capPeriod: "none",
-        requiresFlag: "primeMember", requiresFlagValue: true,
-        notes: "5% for Prime members, uncapped. Gold and gift cards excluded.",
-      },
-      {
-        id: "api-amazon-noprime", name: "Amazon.in without Prime",
-        matchMerchants: ["amazon", "prime-video"],
-        rateBps: 300, capUnits: null, capPeriod: "none",
-        requiresFlag: "primeMember", requiresFlagValue: false,
-        notes: "3% when you are not a Prime member. Same exclusions.",
-      },
-      {
-        id: "api-amazonpay", name: "Amazon Pay merchants", matchApps: ["amazon-pay"],
-        rateBps: 200, capUnits: null, capPeriod: "none",
-        notes: "2% on bill payments, recharges and partner merchants paid through Amazon Pay.",
-      },
-      {
-        id: "api-base", name: "Everything else", isBase: true,
-        rateBps: 100, capUnits: null, capPeriod: "none",
-        notes: "1% on other eligible online and offline spends.",
-      },
-    ],
+    rules: [],
   },
 
   {
@@ -482,7 +439,6 @@ export const CARDS: CardSeed[] = [
     kind: "debit",
     colorFrom: "#F15A22",
     colorTo: "#8C2D05",
-    accountId: "acct-bob",
     rewardUnit: "INR",
     unitValuePaise: 100,
     rewardKind: "instant_cashback",
@@ -506,7 +462,6 @@ export const CARDS: CardSeed[] = [
     issuer: "HDFC Bank",
     network: "rupay",
     kind: "debit",
-    accountId: "acct-hdfc",
     colorFrom: "#0B4F8A",
     colorTo: "#04243F",
     rewardUnit: "INR",
@@ -550,24 +505,6 @@ export const CARDS: CardSeed[] = [
   },
 ];
 
-const ACCOUNTS = [
-  {
-    id: "acct-bob", name: "Bank of Baroda savings", bank: "Bank of Baroda",
-    kind: "savings" as const, colorHex: "#F15A22", sortOrder: 0,
-    balancePaise: R(48250), openingBalancePaise: R(48250),
-  },
-  {
-    id: "acct-hdfc", name: "HDFC Bank savings", bank: "HDFC Bank",
-    kind: "savings" as const, colorHex: "#004C8F", sortOrder: 1,
-    balancePaise: R(126400), openingBalancePaise: R(126400),
-  },
-  {
-    id: "acct-cash", name: "Cash in hand", bank: "", kind: "cash" as const,
-    colorHex: "#2B8A3E", sortOrder: 2, balancePaise: R(3000),
-    openingBalancePaise: R(3000),
-  },
-];
-
 /* ------------------------------------------------------------------ apply */
 
 export async function seedReference(db: DB) {
@@ -608,79 +545,160 @@ export async function seedReference(db: DB) {
       );
   }
 
-  if ((await db.select().from(accounts)).length === 0) {
-    await db.insert(accounts).values(ACCOUNTS.map((a) => ({ ...a })));
+  const manualCatalogCardIds = CARDS
+    .filter(
+      (card) =>
+        CATALOG_INSTRUMENT_IDS.has(card.id) &&
+        !PARTIAL_REWARD_CARD_IDS.has(card.id),
+    )
+    .map((card) => card.id);
+  if (manualCatalogCardIds.length) {
+    await db
+      .delete(rewardRules)
+      .where(inArray(rewardRules.instrumentId, manualCatalogCardIds));
   }
 
-  if ((await db.select().from(instruments)).length === 0) {
-    for (const card of CARDS) {
-      await db.insert(instruments)
-        .values({
-          id: card.id,
-          name: card.name,
-          shortName: card.shortName,
-          issuer: card.issuer,
-          network: card.network,
-          kind: card.kind,
-          last4: "",
-          colorFrom: card.colorFrom ?? "#1F2937",
-          colorTo: card.colorTo ?? "#111827",
-          accountId: card.accountId ?? null,
-          creditLimitPaise: 0,
-          statementDay: card.statementDay ?? 1,
-          dueDay: card.dueDay ?? 20,
-          rewardUnit: card.rewardUnit,
-          unitValuePaise: card.unitValuePaise,
-          rewardKind: card.rewardKind,
-          overallCapUnits: card.overallCapUnits ?? null,
-          overallCapPeriod: card.overallCapPeriod ?? "none",
-          excludedCategories: JSON.stringify(card.excludedCategories),
-          options: JSON.stringify(card.options ?? {}),
-          annualFeePaise: card.annualFeePaise,
-          feeWaiverSpendPaise: card.feeWaiverSpendPaise,
-          forexMarkupBps: card.forexMarkupBps,
-          perks: JSON.stringify(card.perks),
-          sourceNote: card.sourceNote,
-          archived: false,
-          sortOrder: CARDS.indexOf(card),
-        });
+  // Only explicitly maintained partial calculators are published for
+  // catalogue cards. Manual catalogue cards must never retain stale rules.
+  for (const card of CARDS) {
+    const isCatalogCard = CATALOG_INSTRUMENT_IDS.has(card.id);
+    const instrumentRow = {
+      id: card.id,
+      name: card.name,
+      shortName: card.shortName,
+      issuer: card.issuer,
+      network: card.network,
+      kind: card.kind,
+      last4: "",
+      colorFrom: card.colorFrom ?? "#1F2937",
+      colorTo: card.colorTo ?? "#111827",
+      accountId: null,
+      creditLimitPaise: 0,
+      statementDay: card.statementDay ?? 1,
+      dueDay: card.dueDay ?? 20,
+      rewardUnit: card.rewardUnit,
+      unitValuePaise: card.unitValuePaise,
+      rewardKind: card.rewardKind,
+      overallCapUnits: card.overallCapUnits ?? null,
+      overallCapPeriod: card.overallCapPeriod ?? "none",
+      excludedCategories: JSON.stringify(card.excludedCategories),
+      options: JSON.stringify(card.options ?? {}),
+      annualFeePaise: card.annualFeePaise,
+      annualFeeKnown: true,
+      joiningFeeKnown: false,
+      feeWaiverSpendPaise: card.feeWaiverSpendPaise,
+      forexMarkupBps: card.forexMarkupBps,
+      perks: JSON.stringify(card.perks),
+      sourceNote: card.sourceNote,
+      rewardCoverage:
+        !isCatalogCard && card.rules.length
+          ? ("exact" as const)
+          : ("manual" as const),
+      isCatalogCard,
+      archived: false,
+      sortOrder: CARDS.indexOf(card),
+    };
+    const { id: _instrumentId, ...instrumentUpdate } = instrumentRow;
+    await db.insert(instruments)
+      .values(instrumentRow)
+      .onConflictDoUpdate({
+        target: instruments.id,
+        set: instrumentUpdate,
+      });
 
-      for (const [i, rule] of card.rules.entries()) {
-        await db.insert(rewardRules)
-          .values({
-            id: rule.id,
-            instrumentId: card.id,
-            name: rule.name,
-            priority: rule.priority ?? 0,
-            isBase: !!rule.isBase,
-            matchMerchants: JSON.stringify(rule.matchMerchants ?? []),
-            matchCategories: JSON.stringify(rule.matchCategories ?? []),
-            matchApps: JSON.stringify(rule.matchApps ?? []),
-            channel: rule.channel ?? "any",
-            rateType: rule.rateType ?? "percent",
-            rateBps: rule.rateBps ?? 0,
-            blockSizePaise: rule.blockSizePaise ?? 10000,
-            pointsPerBlock: rule.pointsPerBlock ?? 0,
-            minTxnPaise: rule.minTxnPaise ?? 0,
-            maxTxnPaise: null,
-            capUnits: rule.capUnits ?? null,
-            capPeriod: rule.capPeriod ?? "none",
-            capGroup: rule.capGroup ?? rule.id,
-            excludeCategories: JSON.stringify(rule.excludeCategories ?? []),
-            excludeMerchants: JSON.stringify([]),
-            requiresFlag: rule.requiresFlag ?? null,
-            requiresFlagValue: rule.requiresFlagValue ?? true,
-            validFrom: null,
-            validTo: null,
-            active: true,
-            notes: rule.notes ?? "",
-          });
-        void i;
-      }
+    const publishRules =
+      !isCatalogCard || PARTIAL_REWARD_CARD_IDS.has(card.id);
+    for (const [i, rule] of (publishRules ? card.rules : []).entries()) {
+      const ruleRow = {
+        id: rule.id,
+        instrumentId: card.id,
+        name: rule.name,
+        priority: rule.priority ?? 0,
+        isBase: !!rule.isBase,
+        matchMerchants: JSON.stringify(rule.matchMerchants ?? []),
+        matchCategories: JSON.stringify(rule.matchCategories ?? []),
+        matchApps: JSON.stringify(rule.matchApps ?? []),
+        channel: rule.channel ?? "any",
+        rateType: rule.rateType ?? "percent",
+        rateBps: rule.rateBps ?? 0,
+        blockSizePaise: rule.blockSizePaise ?? 10000,
+        pointsPerBlock: rule.pointsPerBlock ?? 0,
+        minTxnPaise: rule.minTxnPaise ?? 0,
+        maxTxnPaise: null,
+        capUnits: rule.capUnits ?? null,
+        capPeriod: rule.capPeriod ?? "none",
+        capGroup: rule.capGroup ?? rule.id,
+        excludeCategories: JSON.stringify(rule.excludeCategories ?? []),
+        excludeMerchants: JSON.stringify([]),
+        requiresFlag: rule.requiresFlag ?? null,
+        requiresFlagValue: rule.requiresFlagValue ?? true,
+        validFrom: null,
+        validTo: null,
+        active: true,
+        notes: rule.notes ?? "",
+      };
+      const { id: _ruleId, ...ruleUpdate } = ruleRow;
+      await db.insert(rewardRules)
+        .values(ruleRow)
+        .onConflictDoUpdate({
+          target: rewardRules.id,
+          set: ruleUpdate,
+        });
+      void i;
     }
+  }
+
+  // Keep catalogue membership explicit. The column default is false so a
+  // legacy custom/global card can never leak into another user's onboarding
+  // picker.
+  for (const card of CARDS) {
+    const isCatalogCard = CATALOG_INSTRUMENT_IDS.has(card.id);
+    await db
+      .update(instruments)
+      .set({
+        accountId: null,
+        annualFeeKnown: true,
+        rewardCoverage:
+          !isCatalogCard && card.rules.length ? "exact" : "manual",
+        isCatalogCard,
+      })
+      .where(eq(instruments.id, card.id));
+  }
+
+  for (const sourceRow of CREDIT_CARD_INSTRUMENT_SEEDS) {
+    const row = sourceRow;
+    const { id: _id, ...projectedUpdate } = row;
+    const fullUpdate: Record<string, unknown> = { ...projectedUpdate };
+    // A catalogue page that does not publish a fee is "unknown", not zero.
+    // Preserve a previously verified value when reseeding an existing DB.
+    if (!row.annualFeeKnown) {
+      delete fullUpdate.annualFeePaise;
+      delete fullUpdate.annualFeeKnown;
+    }
+    if (!row.joiningFeeKnown) {
+      delete fullUpdate.joiningFeePaise;
+      delete fullUpdate.joiningFeeKnown;
+    }
+    await db
+      .insert(instruments)
+      .values(row)
+      .onConflictDoUpdate({
+        target: instruments.id,
+        set: fullUpdate as typeof instruments.$inferInsert,
+      });
   }
 
   await db.insert(settings)
     .values({ key: "seeded_at", value: new Date().toISOString() })
     .onConflictDoNothing();
+  await db
+    .insert(settings)
+    .values({
+      key: "credit_card_catalog_version",
+      value: CREDIT_CARD_CATALOG_VERSION,
+    })
+    .onConflictDoUpdate({
+      target: settings.key,
+      set: { value: CREDIT_CARD_CATALOG_VERSION },
+    });
 }

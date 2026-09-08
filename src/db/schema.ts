@@ -1,4 +1,12 @@
-import { pgTable, text, integer, boolean, index, check } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  integer,
+  boolean,
+  index,
+  check,
+  primaryKey,
+} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /**
@@ -11,32 +19,40 @@ const now = sql`to_char(timezone('utc', now()), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 
 /* ----------------------------------------------------------------- accounts */
 
-export const accounts = pgTable("accounts", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  bank: text("bank").notNull().default(""),
-  kind: text("kind", { enum: ["savings", "current", "wallet", "cash"] })
-    .notNull()
-    .default("savings"),
-  last4: text("last4").notNull().default(""),
-  balancePaise: integer("balance_paise").notNull().default(0),
-  openingBalancePaise: integer("opening_balance_paise").notNull().default(0),
-  openingDate: text("opening_date").notNull().default("2000-01-01"),
-  colorHex: text("color_hex").notNull().default("#4B5563"),
-  upiHandle: text("upi_handle").notNull().default(""),
-  includeInTotals: boolean("include_in_totals")
-    .notNull()
-    .default(true),
-  archived: boolean("archived").notNull().default(false),
-  sortOrder: integer("sort_order").notNull().default(0),
-  notes: text("notes").notNull().default(""),
-  createdAt: text("created_at").notNull().default(now),
-});
+export const accounts = pgTable(
+  "accounts",
+  {
+    id: text("id").primaryKey(),
+    /** Supabase Auth user that owns this account. Null legacy rows are quarantined. */
+    userId: text("user_id"),
+    name: text("name").notNull(),
+    bank: text("bank").notNull().default(""),
+    kind: text("kind", { enum: ["savings", "current", "wallet", "cash"] })
+      .notNull()
+      .default("savings"),
+    last4: text("last4").notNull().default(""),
+    balancePaise: integer("balance_paise").notNull().default(0),
+    openingBalancePaise: integer("opening_balance_paise").notNull().default(0),
+    openingDate: text("opening_date").notNull().default("2000-01-01"),
+    colorHex: text("color_hex").notNull().default("#4B5563"),
+    upiHandle: text("upi_handle").notNull().default(""),
+    includeInTotals: boolean("include_in_totals")
+      .notNull()
+      .default(true),
+    archived: boolean("archived").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    notes: text("notes").notNull().default(""),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("accounts_user_idx").on(t.userId, t.archived, t.sortOrder)],
+).enableRLS();
 
 /* -------------------------------------------------------------- instruments */
 /** A card (credit / debit / prepaid). Debit cards link to a bank account. */
 
-export const instruments = pgTable("instruments", {
+export const instruments = pgTable(
+  "instruments",
+  {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   shortName: text("short_name").notNull(),
@@ -82,14 +98,94 @@ export const instruments = pgTable("instruments", {
   options: text("options").notNull().default("{}"),
 
   annualFeePaise: integer("annual_fee_paise").notNull().default(0),
+  joiningFeePaise: integer("joining_fee_paise").notNull().default(0),
+  annualFeeKnown: boolean("annual_fee_known").notNull().default(false),
+  joiningFeeKnown: boolean("joining_fee_known").notNull().default(false),
+  feeNote: text("fee_note").notNull().default(""),
   feeWaiverSpendPaise: integer("fee_waiver_spend_paise").notNull().default(0),
   forexMarkupBps: integer("forex_markup_bps").notNull().default(350),
   perks: text("perks").notNull().default("[]"),
   sourceNote: text("source_note").notNull().default(""),
+  /** Official catalogue metadata. Reward maths are automated only where coverage is exact. */
+  catalogCategory: text("catalog_category").notNull().default("everyday"),
+  catalogSummary: text("catalog_summary").notNull().default(""),
+  officialUrl: text("official_url").notNull().default(""),
+  termsUrl: text("terms_url").notNull().default(""),
+  verifiedAt: text("verified_at"),
+  availability: text("availability", {
+    enum: [
+      "active",
+      "invite_only",
+      "secured",
+      "applications_paused",
+      "discontinued",
+    ],
+  })
+    .notNull()
+    .default("active"),
+  rewardCoverage: text("reward_coverage", {
+    enum: ["exact", "partial", "manual"],
+  })
+    .notNull()
+    .default("manual"),
+  isCatalogCard: boolean("is_catalog_card").notNull().default(false),
+  /** Set only for a user's manually-added card; official catalogue rows stay global. */
+  ownerUserId: text("owner_user_id"),
   archived: boolean("archived").notNull().default(false),
   sortOrder: integer("sort_order").notNull().default(0),
-  createdAt: text("created_at").notNull().default(now),
-});
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("instrument_catalog_idx").on(
+      t.isCatalogCard,
+      t.availability,
+      t.archived,
+      t.sortOrder,
+    ),
+    index("instrument_owner_idx").on(t.ownerUserId, t.archived, t.sortOrder),
+    check(
+      "instruments_availability_check",
+      sql`${t.availability} IN ('active', 'invite_only', 'secured', 'applications_paused', 'discontinued')`,
+    ),
+    check(
+      "instruments_reward_coverage_check",
+      sql`${t.rewardCoverage} IN ('exact', 'partial', 'manual')`,
+    ),
+    check(
+      "instruments_verified_at_iso_check",
+      sql`${t.verifiedAt} IS NULL OR ${t.verifiedAt} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`,
+    ),
+    check(
+      "instruments_joining_fee_nonnegative",
+      sql`${t.joiningFeePaise} >= 0`,
+    ),
+  ],
+).enableRLS();
+
+/* ---------------------------------------------- user card configuration */
+
+export const userCardSelections = pgTable(
+  "user_card_selections",
+  {
+    userId: text("user_id").notNull(),
+    instrumentId: text("instrument_id")
+      .notNull()
+      .references(() => instruments.id, { onDelete: "restrict" }),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.instrumentId] }),
+    index("user_card_selection_user_idx").on(t.userId),
+    index("user_card_selection_instrument_idx").on(t.instrumentId),
+  ],
+).enableRLS();
+
+export const userOnboarding = pgTable("user_onboarding", {
+  userId: text("user_id").primaryKey(),
+  cardsCompletedAt: text("cards_completed_at"),
+  skippedCards: boolean("skipped_cards").notNull().default(false),
+  updatedAt: text("updated_at").notNull().default(now),
+}).enableRLS();
 
 /* ------------------------------------------------------------- reward rules */
 
@@ -156,48 +252,84 @@ export const rewardRules = pgTable(
     createdAt: text("created_at").notNull().default(now),
   },
   (t) => [index("rr_instrument_idx").on(t.instrumentId)],
-);
+).enableRLS();
 
 /* --------------------------------------------------------------- taxonomy */
 
-export const categories = pgTable("categories", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  slug: text("slug").notNull().unique(),
-  icon: text("icon").notNull().default("Circle"),
-  colorHex: text("color_hex").notNull().default("#6B7280"),
-  parentSlug: text("parent_slug"),
-  /** Miscellaneous / Other prompt for a free-text label on each expense. */
-  requiresLabel: boolean("requires_label")
-    .notNull()
-    .default(false),
-  isSystem: boolean("is_system").notNull().default(false),
-  archived: boolean("archived").notNull().default(false),
-  sortOrder: integer("sort_order").notNull().default(0),
-});
+export const categories = pgTable(
+  "categories",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull().unique(),
+    icon: text("icon").notNull().default("Circle"),
+    colorHex: text("color_hex").notNull().default("#6B7280"),
+    parentSlug: text("parent_slug"),
+    /** Miscellaneous / Other prompt for a free-text label on each expense. */
+    requiresLabel: boolean("requires_label")
+      .notNull()
+      .default(false),
+    isSystem: boolean("is_system").notNull().default(false),
+    /** Null for system taxonomy; otherwise the owning Supabase Auth user. */
+    ownerUserId: text("owner_user_id"),
+    archived: boolean("archived").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [
+    index("categories_owner_idx").on(t.ownerUserId, t.archived, t.sortOrder),
+    check(
+      "categories_system_owner_check",
+      sql`NOT ${t.isSystem} OR ${t.ownerUserId} IS NULL`,
+    ),
+  ],
+).enableRLS();
 
-export const merchants = pgTable("merchants", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  slug: text("slug").notNull().unique(),
-  categorySlug: text("category_slug"),
-  colorHex: text("color_hex").notNull().default("#6B7280"),
-  isSystem: boolean("is_system").notNull().default(false),
-});
+export const merchants = pgTable(
+  "merchants",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull().unique(),
+    categorySlug: text("category_slug"),
+    colorHex: text("color_hex").notNull().default("#6B7280"),
+    isSystem: boolean("is_system").notNull().default(false),
+    /** Null for system merchants; otherwise the owning Supabase Auth user. */
+    ownerUserId: text("owner_user_id"),
+  },
+  (t) => [
+    index("merchants_owner_idx").on(t.ownerUserId, t.name),
+    check(
+      "merchants_system_owner_check",
+      sql`NOT ${t.isSystem} OR ${t.ownerUserId} IS NULL`,
+    ),
+  ],
+).enableRLS();
 
-export const paymentApps = pgTable("payment_apps", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  slug: text("slug").notNull().unique(),
-  kind: text("kind", {
-    enum: ["upi", "card", "netbanking", "wallet", "cash", "other"],
-  })
-    .notNull()
-    .default("upi"),
-  colorHex: text("color_hex").notNull().default("#6B7280"),
-  isSystem: boolean("is_system").notNull().default(false),
-  sortOrder: integer("sort_order").notNull().default(0),
-});
+export const paymentApps = pgTable(
+  "payment_apps",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull().unique(),
+    kind: text("kind", {
+      enum: ["upi", "card", "netbanking", "wallet", "cash", "other"],
+    })
+      .notNull()
+      .default("upi"),
+    colorHex: text("color_hex").notNull().default("#6B7280"),
+    isSystem: boolean("is_system").notNull().default(false),
+    /** Null for system methods; otherwise the owning Supabase Auth user. */
+    ownerUserId: text("owner_user_id"),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [
+    index("payment_apps_owner_idx").on(t.ownerUserId, t.sortOrder),
+    check(
+      "payment_apps_system_owner_check",
+      sql`NOT ${t.isSystem} OR ${t.ownerUserId} IS NULL`,
+    ),
+  ],
+).enableRLS();
 
 /* --------------------------------------------------------------- expenses */
 
@@ -271,7 +403,7 @@ export const expenses = pgTable(
     index("exp_instrument_idx").on(t.instrumentId, t.occurredAt),
     index("exp_category_idx").on(t.categorySlug),
   ],
-);
+).enableRLS();
 
 /** Extra discounts, coupons, bank offers, fees — many per expense, editable. */
 export const adjustments = pgTable(
@@ -314,7 +446,7 @@ export const adjustments = pgTable(
     index("adj_user_idx").on(t.userId),
     index("adj_expense_idx").on(t.expenseId),
   ],
-);
+).enableRLS();
 
 export const refunds = pgTable(
   "refunds",
@@ -340,7 +472,7 @@ export const refunds = pgTable(
     index("ref_user_idx").on(t.userId),
     index("ref_expense_idx").on(t.expenseId),
   ],
-);
+).enableRLS();
 
 /* ----------------------------------------------- standalone reimbursements */
 /**
@@ -383,7 +515,7 @@ export const standaloneReimbursements = pgTable(
       sql`${t.expectedPaise} > 0`,
     ),
   ],
-);
+).enableRLS();
 
 export const standaloneReimbursementReceipts = pgTable(
   "standalone_reimbursement_receipts",
@@ -403,7 +535,7 @@ export const standaloneReimbursementReceipts = pgTable(
     index("standalone_receipt_reimbursement_idx").on(t.reimbursementId),
     check("standalone_receipt_amount_positive", sql`${t.amountPaise} > 0`),
   ],
-);
+).enableRLS();
 
 /* ---------------------------------------------------------- people & p2p */
 
@@ -426,7 +558,7 @@ export const people = pgTable(
     createdAt: text("created_at").notNull().default(now),
   },
   (t) => [index("people_user_idx").on(t.userId)],
-);
+).enableRLS();
 
 export const transfers = pgTable(
   "transfers",
@@ -462,17 +594,19 @@ export const transfers = pgTable(
     index("tr_person_idx").on(t.personId),
     index("tr_date_idx").on(t.occurredAt),
   ],
-);
+).enableRLS();
 
 /* ------------------------------------------------------------- key/value */
 
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
-});
+}).enableRLS();
 
 export type Account = typeof accounts.$inferSelect;
 export type Instrument = typeof instruments.$inferSelect;
+export type UserCardSelection = typeof userCardSelections.$inferSelect;
+export type UserOnboarding = typeof userOnboarding.$inferSelect;
 export type RewardRule = typeof rewardRules.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Merchant = typeof merchants.$inferSelect;

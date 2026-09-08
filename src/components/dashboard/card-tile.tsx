@@ -3,9 +3,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
-import { ArrowUpRight, Infinity as InfinityIcon } from "lucide-react";
+import { ArrowUpRight, BookOpen, Infinity as InfinityIcon } from "lucide-react";
 import type { CardSummary } from "@/server/queries";
 import { formatMoney, formatMoneyShort, formatUnits } from "@/lib/money";
+import { rewardAutomationEnabled } from "@/lib/rewards/coverage";
 import { Tooltip } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +27,8 @@ export function CardTile({
 }) {
   const { instrument, netSpendPaise, rewardValuePaise, rewardUnitsMilli, txnCount, caps, rewardLostPaise } = summary;
   const reduce = useReducedMotion();
+  const rewardIsCalculable = rewardAutomationEnabled(instrument);
+  const rewardIsEstimate = instrument.rewardCoverage === "partial";
 
   const tightest = caps.reduce<number>((max, c) => Math.max(max, c.pctUsed), 0);
   const exhausted = caps.some((c) => c.pctUsed >= 99.5);
@@ -73,9 +76,15 @@ export function CardTile({
                 {formatMoneyShort(netSpendPaise)}
               </p>
             </div>
-            {rewardValuePaise > 0 && (
+            {rewardIsCalculable && rewardValuePaise > 0 && (
               <span className="rounded-[6px] bg-white/18 px-1.5 py-1 text-[0.6875rem] font-semibold tnum">
-                +{formatMoneyShort(rewardValuePaise)}
+                {rewardIsEstimate ? "~" : "+"}
+                {formatMoneyShort(rewardValuePaise)}
+              </span>
+            )}
+            {!rewardIsCalculable && (
+              <span className="rounded-[6px] bg-white/18 px-1.5 py-1 text-[0.625rem] font-semibold uppercase tracking-wide">
+                Statement
               </span>
             )}
           </div>
@@ -85,51 +94,76 @@ export function CardTile({
 
         {/* ---- cap meters ---- */}
         <div className="space-y-2 p-3">
-          {caps.length === 0 ? (
-            <div className="flex items-center gap-1.5 text-[0.75rem] text-ink-3">
-              <InfinityIcon className="size-3.5" aria-hidden />
-              {instrument.rewardUnit === "INR" && summary.rewardValuePaise === 0 && txnCount > 0
-                ? "No standing reward programme"
-                : "No caps on this card"}
+          {!rewardIsCalculable ? (
+            <div>
+              <div className="flex items-center gap-1.5 text-[0.75rem] font-medium text-ink-2">
+                <BookOpen className="size-3.5 text-accent" aria-hidden />
+                Rewards tracked on issuer statement
+              </div>
+              <p className="mt-1 text-[0.6875rem] leading-relaxed text-ink-3">
+                Not included in LedgerKit&apos;s automated reward totals.
+              </p>
             </div>
           ) : (
-            caps.slice(0, 3).map((cap, i) => (
-              <CapMeter
-                key={cap.ruleId}
-                label={cap.ruleName}
-                pct={cap.pctUsed}
-                used={cap.usedUnits}
-                total={cap.capUnits}
-                unit={instrument.rewardUnit}
-                period={PERIOD_WORD[cap.capPeriod]}
-                headroomPaise={cap.headroomSpendPaise}
-                delay={reduce ? 0 : 0.18 + index * 0.05 + i * 0.06}
-              />
-            ))
-          )}
+            <>
+              {caps.length === 0 ? (
+                <div className="flex items-center gap-1.5 text-[0.75rem] text-ink-3">
+                  <InfinityIcon className="size-3.5" aria-hidden />
+                  {instrument.rewardUnit === "INR" &&
+                  summary.rewardValuePaise === 0 &&
+                  txnCount > 0
+                    ? "No reward rule matched"
+                    : "No caps on this card"}
+                </div>
+              ) : (
+                caps.slice(0, 3).map((cap, i) => (
+                  <CapMeter
+                    key={cap.ruleId}
+                    label={cap.ruleName}
+                    pct={cap.pctUsed}
+                    used={cap.usedUnits}
+                    total={cap.capUnits}
+                    unit={instrument.rewardUnit}
+                    period={PERIOD_WORD[cap.capPeriod]}
+                    headroomPaise={cap.headroomSpendPaise}
+                    delay={reduce ? 0 : 0.18 + index * 0.05 + i * 0.06}
+                  />
+                ))
+              )}
 
-          {rewardUnitsMilli > 0 && instrument.rewardUnit !== "INR" && (
-            <p className="pt-0.5 text-[0.6875rem] text-ink-3">
-              {formatUnits(rewardUnitsMilli, instrument.rewardUnit)} earned ·
-              worth {formatMoney(rewardValuePaise)}
-            </p>
-          )}
+              {rewardUnitsMilli > 0 && instrument.rewardUnit !== "INR" && (
+                <p className="pt-0.5 text-[0.6875rem] text-ink-3">
+                  {formatUnits(rewardUnitsMilli, instrument.rewardUnit)}{" "}
+                  {rewardIsEstimate ? "estimated" : "earned"} ·
+                  worth {formatMoney(rewardValuePaise)}
+                </p>
+              )}
 
-          {rewardLostPaise > 0 && (
-            <p className="text-[0.6875rem] font-medium text-warn">
-              {formatMoney(rewardLostPaise)} missed — caps were already full
-            </p>
-          )}
+              {rewardIsEstimate && (
+                <p className="text-[0.6875rem] font-medium text-warn">
+                  Partial estimate · confirm on your statement
+                </p>
+              )}
 
-          {exhausted && (
-            <p className="text-[0.6875rem] font-medium text-warn">
-              Move further spending to another card
-            </p>
-          )}
-          {!exhausted && tightest > 0 && tightest < 99.5 && caps.length > 0 && (
-            <p className="text-[0.6875rem] text-ink-3">
-              {Math.round(tightest)}% of the tightest cap used
-            </p>
+              {rewardLostPaise > 0 && (
+                <p className="text-[0.6875rem] font-medium text-warn">
+                  {formatMoney(rewardLostPaise)}{" "}
+                  {rewardIsEstimate ? "estimated missed" : "missed"} — caps were
+                  already full
+                </p>
+              )}
+
+              {exhausted && (
+                <p className="text-[0.6875rem] font-medium text-warn">
+                  Move further spending to another card
+                </p>
+              )}
+              {!exhausted && tightest > 0 && tightest < 99.5 && caps.length > 0 && (
+                <p className="text-[0.6875rem] text-ink-3">
+                  {Math.round(tightest)}% of the tightest cap used
+                </p>
+              )}
+            </>
           )}
         </div>
       </motion.article>

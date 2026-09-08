@@ -1,7 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
-import { db } from "@/db/client";
-import { seedReference } from "@/db/seed";
 import { fail, ok } from "@/lib/api";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -34,24 +32,12 @@ export async function POST(request: Request) {
     return fail("The registration secret is incorrect.", 403);
   }
 
-  try {
-    // Ensures a brand-new database has LedgerKit's cards and categories.
-    await seedReference(db);
-  } catch (error) {
-    // Keep credentials and stack traces out of the response, while retaining
-    // enough detail in Vercel Functions logs to diagnose connection failures.
-    console.error("Registration database initialization failed", {
-      name: error instanceof Error ? error.name : "UnknownError",
-      message: error instanceof Error ? error.message : "Unknown database error",
-    });
-    return fail("The database is unavailable. Please try again shortly.", 503);
-  }
-
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin.auth.admin.createUser({
     email: parsed.data.email,
     password: parsed.data.password,
     email_confirm: true,
+    app_metadata: { card_onboarding_completed: false },
   });
   if (error || !data.user) {
     const duplicate = error?.message.toLowerCase().includes("already");
@@ -72,5 +58,5 @@ export async function POST(request: Request) {
     return ok({ redirectTo: "/login" });
   }
 
-  return ok({ redirectTo: "/" });
+  return ok({ redirectTo: "/onboarding/cards" });
 }

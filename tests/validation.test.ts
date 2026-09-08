@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { expenseEditSchema } from "../src/lib/validation.ts";
+import { expenseEditSchema } from "../src/lib/validation";
 
 const completeEditPayload = {
   occurredAt: "2026-09-03",

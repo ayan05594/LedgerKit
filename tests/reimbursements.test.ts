@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import {
   deriveStandaloneReimbursementState,
   type StandaloneReimbursementState,
-} from "../src/lib/reimbursements.ts";
+} from "../src/lib/reimbursements";
 import {
   standaloneReimbursementReceiptSchema,
   standaloneReimbursementSchema,
-} from "../src/lib/validation.ts";
+} from "../src/lib/validation";
 
 let passed = 0;
 

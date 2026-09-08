@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { prepareDatabaseRead } from "@/db/client";
 import { AuthenticationError } from "@/lib/auth";
 
 export function ok<T>(data: T) {
@@ -71,14 +70,12 @@ function readWithTimeout<T>(fn: () => T | Promise<T>) {
   return Promise.race([operation, deadline]).finally(() => clearTimeout(timeout));
 }
 
-// Safe database reads get one invisible retry with a fresh connection pool.
+// Safe Data API reads get one invisible retry for a transient network failure.
 export async function runDatabaseRead<T>(fn: () => T | Promise<T>) {
   try {
-    await prepareDatabaseRead();
     return await readWithTimeout(fn);
   } catch (error) {
     if (isTransientDatabaseError(error)) {
-      await prepareDatabaseRead(true);
       return await readWithTimeout(fn);
     }
     throw error;

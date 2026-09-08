@@ -2,9 +2,17 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronRight, CreditCard, Plus, RefreshCw, TriangleAlert } from "lucide-react";
-import { useCreateInstrument, useReference, useSummary } from "@/lib/client-api";
+import {
+  ChevronRight,
+  CreditCard,
+  RefreshCw,
+  SlidersHorizontal,
+  TriangleAlert,
+  WalletCards,
+} from "lucide-react";
+import { useReference, useSummary } from "@/lib/client-api";
 import { formatMoney, formatMoneyShort, percentFromBps } from "@/lib/money";
+import { rewardAutomationEnabled } from "@/lib/rewards/coverage";
 import { Button, Chip, EmptyState, Panel, Spinner } from "@/components/ui/primitives";
 
 export default function CardsPage() {
@@ -16,10 +24,18 @@ export default function CardsPage() {
     isFetching,
     refetch,
   } = useSummary(now.getFullYear(), now.getMonth() + 1);
-  const { data: reference } = useReference();
-  const createInstrument = useCreateInstrument();
+  const {
+    data: reference,
+    error: referenceError,
+    isLoading: isReferenceLoading,
+    isFetching: isReferenceFetching,
+    refetch: refetchReference,
+  } = useReference();
 
   const summary = data?.summary;
+  const selectedIds = new Set(reference?.instruments.map((card) => card.id) ?? []);
+  const visibleCards =
+    summary?.cards.filter((card) => selectedIds.has(card.instrument.id)) ?? [];
 
   return (
     <div className="space-y-4">
@@ -29,38 +45,33 @@ export default function CardsPage() {
             Cards &amp; rewards
           </h1>
           <p className="hint mt-0.5">
-            Every rate, cap and exclusion below is editable. Issuers change these
-            often — keep them honest.
+            Your cards, their reward details and what they have earned this
+            month.
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          loading={createInstrument.isPending}
-          onClick={() =>
-            createInstrument.mutate({
-              name: "New card",
-              shortName: "New card",
-              issuer: "",
-            })
-          }
+        <Link
+          href="/settings#my-cards"
+          className="btn btn-secondary btn-sm"
         >
-          <Plus className="size-3.5" />
-          Add a card
-        </Button>
+          <SlidersHorizontal className="size-3.5" />
+          Manage cards
+        </Link>
       </header>
 
-      {error ? (
+      {error || referenceError ? (
         <Panel>
           <EmptyState
             icon={<TriangleAlert className="size-5" />}
             title="Cards could not be loaded"
-            body={error.message}
+            body={(error ?? referenceError)?.message ?? "Please try again."}
             action={
               <Button
                 variant="secondary"
-                loading={isFetching}
-                onClick={() => void refetch()}
+                loading={isFetching || isReferenceFetching}
+                onClick={() => {
+                  void refetch();
+                  void refetchReference();
+                }}
               >
                 <RefreshCw className="size-4" />
                 Try again
@@ -68,13 +79,27 @@ export default function CardsPage() {
             }
           />
         </Panel>
-      ) : isLoading || !summary ? (
+      ) : isLoading || isReferenceLoading || !summary || !reference ? (
         <div className="flex justify-center py-20">
           <Spinner className="size-5" />
         </div>
+      ) : visibleCards.length === 0 ? (
+        <Panel>
+          <EmptyState
+            icon={<WalletCards className="size-5" />}
+            title="Your card wallet is empty"
+            body="Choose the credit cards you use and LedgerKit will show their coverage information and any available reward estimates."
+            action={
+              <Link href="/settings#my-cards" className="btn btn-primary">
+                <CreditCard className="size-4" />
+                Choose my cards
+              </Link>
+            }
+          />
+        </Panel>
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
-          {summary.cards.map((card) => {
+          {visibleCards.map((card) => {
             const rules = (reference?.rules ?? []).filter(
               (r) => r.instrumentId === card.instrument.id && r.active,
             );
@@ -83,6 +108,8 @@ export default function CardsPage() {
               card.instrument.excludedCategories,
               [],
             );
+            const rewardIsCalculable = rewardAutomationEnabled(card.instrument);
+            const rewardIsEstimate = card.instrument.rewardCoverage === "partial";
 
             return (
               <Link
@@ -103,8 +130,12 @@ export default function CardsPage() {
                       </p>
                       <p className="text-[0.75rem] text-white/70">
                         {card.instrument.kind === "credit" ? "Credit" : "Debit"} ·{" "}
-                        {card.instrument.network.toUpperCase()} · rewards in{" "}
-                        {card.instrument.rewardUnit}
+                        {card.instrument.network.toUpperCase()} ·{" "}
+                        {rewardIsCalculable
+                          ? rewardIsEstimate
+                            ? `estimated rewards in ${card.instrument.rewardUnit}`
+                            : `rewards in ${card.instrument.rewardUnit}`
+                          : "manual reward tracking"}
                       </p>
                     </div>
                     <div className="shrink-0 text-right">
@@ -120,7 +151,9 @@ export default function CardsPage() {
                     <ul className="space-y-1.5">
                       {rules.length === 0 && (
                         <li className="text-[0.8125rem] text-ink-2">
-                          No standing reward rules. Log offers per expense instead.
+                          {rewardIsCalculable
+                            ? "No supported reward rules are available for this card yet."
+                            : "Reward rules are not automated for this card. Check the linked issuer terms for the current programme."}
                         </li>
                       )}
                       {rules.slice(0, 5).map((rule) => (
@@ -162,12 +195,21 @@ export default function CardsPage() {
                     )}
 
                     <div className="flex flex-wrap gap-1.5 border-t border-rule pt-3">
-                      <Chip tone={card.rewardValuePaise > 0 ? "gain" : "neutral"}>
-                        {formatMoney(card.rewardValuePaise)} earned
-                      </Chip>
-                      {card.rewardLostPaise > 0 && (
+                      {rewardIsCalculable ? (
+                        <Chip tone={card.rewardValuePaise > 0 ? "gain" : "neutral"}>
+                          {formatMoney(card.rewardValuePaise)}{" "}
+                          {rewardIsEstimate ? "estimated" : "earned"}
+                        </Chip>
+                      ) : (
+                        <Chip tone="neutral">reward calculation not automated</Chip>
+                      )}
+                      {rewardIsEstimate && (
+                        <Chip tone="warn">partial coverage · verify statement</Chip>
+                      )}
+                      {rewardIsCalculable && card.rewardLostPaise > 0 && (
                         <Chip tone="warn">
-                          {formatMoney(card.rewardLostPaise)} lost to caps
+                          {formatMoney(card.rewardLostPaise)}{" "}
+                          {rewardIsEstimate ? "estimated lost to caps" : "lost to caps"}
                         </Chip>
                       )}
                       <Chip tone="neutral">{card.txnCount} spends</Chip>

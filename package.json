@@ -12,8 +12,10 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx src/db/seed-runner.ts",
+    "db:catalog:sql": "node --import tsx scripts/generate-card-catalog-sql.mjs --write-migration=supabase/migrations/20260908120000_card_catalog_onboarding.sql",
+    "db:catalog:print": "node --import tsx scripts/generate-card-catalog-sql.mjs",
     "typecheck": "tsc --noEmit --allowImportingTsExtensions",
-    "test": "tsx tests/engine.test.ts && tsx tests/validation.test.ts && tsx tests/reimbursements.test.ts"
+    "test": "tsx tests/engine.test.ts && tsx tests/validation.test.ts && tsx tests/reimbursements.test.ts && tsx tests/credit-card-catalog.test.ts && tsx tests/tenant-isolation.test.ts && tsx tests/data-api-mutations.test.ts && tsx tests/manual-rewards-ui.test.ts && tsx tests/manual-card-fallback.test.ts"
   },
   "keywords": [],
   "author": "",
@@ -43,7 +45,7 @@
     "lucide-react": "^1.41.0",
     "motion": "^13.2.0",
     "nanoid": "^6.0.1",
-    "next": "^15.5.25",
+    "next": "^16.3.4",
     "postgres": "^3.4.9",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

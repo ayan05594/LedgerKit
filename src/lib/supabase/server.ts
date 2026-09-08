@@ -12,12 +12,8 @@ export async function createSupabaseServerClient() {
         return cookieStore.getAll();
       },
       setAll(values) {
-        try {
-          for (const { name, value, options } of values) {
-            cookieStore.set(name, value, options);
-          }
-        } catch {
-          // Server Components cannot write cookies. Middleware refreshes them.
+        for (const { name, value, options } of values) {
+          cookieStore.set(name, value, options);
         }
       },
     },

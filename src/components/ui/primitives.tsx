@@ -45,6 +45,7 @@ export const Button = React.forwardRef<
 
 export function Field({
   label,
+  htmlFor,
   hint,
   error,
   required,
@@ -52,6 +53,7 @@ export function Field({
   className,
 }: {
   label?: string;
+  htmlFor?: string;
   hint?: string;
   error?: string;
   required?: boolean;
@@ -61,7 +63,7 @@ export function Field({
   return (
     <div className={cn("min-w-0", className)}>
       {label && (
-        <label className="field-label">
+        <label htmlFor={htmlFor} className="field-label">
           {label}
           {required && <span className="text-alert"> *</span>}
         </label>
@@ -127,16 +129,27 @@ export function Segmented<T extends string>({
   onChange,
   className,
   fullWidth,
+  ariaLabel,
+  ariaLabelledBy,
 }: {
-  options: { value: T; label: string; icon?: React.ReactNode }[];
+  options: {
+    value: T;
+    label: string;
+    icon?: React.ReactNode;
+    disabled?: boolean;
+  }[];
   value: T;
   onChange: (v: T) => void;
   className?: string;
   fullWidth?: boolean;
+  ariaLabel?: string;
+  ariaLabelledBy?: string;
 }) {
   return (
     <div
       role="radiogroup"
+      aria-label={ariaLabel}
+      aria-labelledby={ariaLabelledBy}
       className={cn(
         "gap-0.5 rounded-[10px] border border-rule-strong bg-sunken p-0.5",
         fullWidth ? "flex w-full" : "inline-flex",
@@ -151,6 +164,8 @@ export function Segmented<T extends string>({
             type="button"
             role="radio"
             aria-checked={active}
+            aria-disabled={o.disabled || undefined}
+            disabled={o.disabled}
             onClick={() => onChange(o.value)}
             className={cn(
               "flex items-center justify-center gap-1.5 rounded-[8px] px-2.5 py-1.5 text-[0.8125rem] font-medium transition-colors",
@@ -158,6 +173,7 @@ export function Segmented<T extends string>({
               active
                 ? "bg-surface text-ink shadow-[0_1px_2px_rgba(16,24,40,0.06)]"
                 : "text-ink-2 hover:text-ink",
+              o.disabled && "cursor-not-allowed opacity-45 hover:text-ink-2",
             )}
           >
             {o.icon}

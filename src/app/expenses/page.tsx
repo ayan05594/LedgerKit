@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import {
+  BookOpen,
   Filter,
   Hourglass,
   Plus,
@@ -14,6 +15,7 @@ import {
 import type { ExpenseRow } from "@/server/queries";
 import { useExpenses, useReference } from "@/lib/client-api";
 import { formatMoney, formatMoneyShort } from "@/lib/money";
+import { rewardAutomationEnabled } from "@/lib/rewards/coverage";
 import { formatDateShort, monthBounds, todayISO } from "@/lib/rewards/periods";
 import { CategoryIcon } from "@/components/expenses/category-picker";
 import {
@@ -77,7 +79,19 @@ export default function ExpensesPage() {
     return {
       gross: list.reduce((s, r) => s + r.math.grossPaise, 0),
       net: list.reduce((s, r) => s + r.math.netSpendPaise, 0),
-      reward: list.reduce((s, r) => s + r.math.rewardValuePaise, 0),
+      reward: list.reduce(
+        (s, r) =>
+          r.instrument && rewardAutomationEnabled(r.instrument)
+            ? s + r.math.rewardValuePaise
+            : s,
+        0,
+      ),
+      manualRewardCount: list.filter(
+        (r) => r.instrument && !rewardAutomationEnabled(r.instrument),
+      ).length,
+      estimatedRewardCount: list.filter(
+        (r) => r.instrument?.rewardCoverage === "partial",
+      ).length,
       owed: list.reduce((s, r) => s + r.math.receivablePaise, 0),
     };
   }, [rows]);
@@ -104,7 +118,15 @@ export default function ExpensesPage() {
             {error
               ? "Could not load expenses"
               : rows
-              ? `${rows.length} ${rows.length === 1 ? "expense" : "expenses"} · ${formatMoney(totals.net)} net · ${formatMoney(totals.reward)} earned back`
+              ? `${rows.length} ${rows.length === 1 ? "expense" : "expenses"} · ${formatMoney(totals.net)} net · ${
+                  totals.manualRewardCount > 0
+                    ? totals.reward > 0
+                      ? `${formatMoney(totals.reward)} automated rewards`
+                      : "rewards need a statement check"
+                    : totals.estimatedRewardCount > 0
+                      ? `${formatMoney(totals.reward)} estimated rewards`
+                    : `${formatMoney(totals.reward)} earned back`
+                }`
               : "Loading"}
           </p>
         </div>
@@ -120,6 +142,9 @@ export default function ExpensesPage() {
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-ink-3" />
             <Input
+              id="expense-search"
+              name="expenseSearch"
+              aria-label="Search expenses"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search description, merchant or notes"
@@ -128,6 +153,8 @@ export default function ExpensesPage() {
           </div>
           <div className="flex items-center gap-2">
             <Input
+              id="expense-from-date"
+              name="expenseFromDate"
               type="date"
               value={from}
               onChange={(e) => setFrom(e.target.value)}
@@ -136,6 +163,8 @@ export default function ExpensesPage() {
             />
             <span className="shrink-0 text-ink-3">to</span>
             <Input
+              id="expense-to-date"
+              name="expenseToDate"
               type="date"
               value={to}
               onChange={(e) => setTo(e.target.value)}
@@ -160,6 +189,8 @@ export default function ExpensesPage() {
         {showFilters && (
           <div className="anim-fade mt-3 grid gap-2 border-t border-rule pt-3 sm:grid-cols-2 lg:grid-cols-4">
             <Select
+              id="expense-card-filter"
+              name="instrumentId"
               value={instrumentId}
               onChange={(e) => setInstrumentId(e.target.value)}
               aria-label="Card"
@@ -172,6 +203,8 @@ export default function ExpensesPage() {
               ))}
             </Select>
             <Select
+              id="expense-account-filter"
+              name="accountId"
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
               aria-label="Account"
@@ -184,6 +217,8 @@ export default function ExpensesPage() {
               ))}
             </Select>
             <Select
+              id="expense-category-filter"
+              name="categorySlug"
               value={categorySlug}
               onChange={(e) => setCategorySlug(e.target.value)}
               aria-label="Category"
@@ -198,6 +233,8 @@ export default function ExpensesPage() {
             </Select>
             <div className="flex gap-2">
               <Select
+                id="expense-special-filter"
+                name="specialFilter"
                 value={flag}
                 onChange={(e) =>
                   setFlag(e.target.value as "" | "reimbursable" | "refunded")
@@ -255,7 +292,7 @@ export default function ExpensesPage() {
             body={
               filtersActive
                 ? "Try widening the dates or clearing a filter."
-                : "Add one and the reward engine works out what your card pays back."
+                : "Add one to track your spending and any supported card reward estimates."
             }
             action={
               filtersActive ? (
@@ -283,11 +320,48 @@ export default function ExpensesPage() {
       </Panel>
 
       {rows && rows.length > 0 && (
-        <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
-          <Total label="Gross" value={formatMoney(totals.gross)} />
-          <Total label="Net spend" value={formatMoney(totals.net)} strong />
-          <Total label="Earned back" value={formatMoney(totals.reward)} tone="gain" />
-          <Total label="Owed to you" value={formatMoney(totals.owed)} tone="warn" />
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
+            <Total label="Gross" value={formatMoney(totals.gross)} />
+            <Total label="Net spend" value={formatMoney(totals.net)} strong />
+            <Total
+              label={
+                totals.manualRewardCount > 0
+                  ? "Automated rewards"
+                  : totals.estimatedRewardCount > 0
+                    ? "Estimated rewards"
+                    : "Earned back"
+              }
+              value={
+                totals.manualRewardCount > 0 && totals.reward === 0
+                  ? "Check statements"
+                  : formatMoney(totals.reward)
+              }
+              tone="gain"
+            />
+            <Total label="Owed to you" value={formatMoney(totals.owed)} tone="warn" />
+          </div>
+          {totals.manualRewardCount > 0 && (
+            <div className="flex items-start gap-2 rounded-[10px] border border-accent/20 bg-accent-soft px-3 py-2.5 text-[0.75rem] leading-relaxed text-ink-2">
+              <BookOpen className="mt-0.5 size-3.5 shrink-0 text-accent" aria-hidden />
+              <p>
+                Reward totals exclude {totals.manualRewardCount}{" "}
+                {totals.manualRewardCount === 1 ? "expense" : "expenses"} on
+                statement-tracked cards. Check those issuer statements for the
+                actual points or cashback.
+              </p>
+            </div>
+          )}
+          {totals.estimatedRewardCount > 0 && (
+            <div className="flex items-start gap-2 rounded-[10px] border border-warn/25 bg-warn-soft px-3 py-2.5 text-[0.75rem] leading-relaxed text-warn">
+              <Sparkles className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              <p>
+                Reward totals include {totals.estimatedRewardCount}{" "}
+                {totals.estimatedRewardCount === 1 ? "expense" : "expenses"} using
+                partial card coverage. Confirm final rewards on issuer statements.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -302,6 +376,10 @@ export default function ExpensesPage() {
 
 function ExpenseListRow({ row, onOpen }: { row: ExpenseRow; onOpen: () => void }) {
   const { expense, math, instrument, account, category, app } = row;
+  const rewardIsCalculable = Boolean(
+    instrument && rewardAutomationEnabled(instrument),
+  );
+  const rewardIsEstimate = instrument?.rewardCoverage === "partial";
   const title =
     expense.customLabel ||
     expense.description ||
@@ -390,18 +468,36 @@ function ExpenseListRow({ row, onOpen }: { row: ExpenseRow; onOpen: () => void }
           >
             {formatMoney(math.netSpendPaise)}
           </span>
-          {math.rewardValuePaise > 0 && (
-            <Tooltip content={expense.rewardExplain}>
+          {rewardIsCalculable && math.rewardValuePaise > 0 && (
+            <Tooltip
+              content={
+                rewardIsEstimate
+                  ? `${expense.rewardExplain} This is a partial-coverage estimate.`
+                  : expense.rewardExplain
+              }
+            >
               <span className="mt-0.5 inline-flex items-center gap-1 text-[0.75rem] font-medium text-gain tnum">
                 <Sparkles className="size-3" />
                 {formatMoneyShort(math.rewardValuePaise)}
+                {rewardIsEstimate && <span className="sr-only"> estimated</span>}
               </span>
             </Tooltip>
           )}
-          {math.rewardValuePaise === 0 && expense.rewardExplain && instrument && (
-            <Tooltip content={expense.rewardExplain}>
-              <span className="mt-0.5 block text-[0.6875rem] text-ink-3">
-                no reward
+          {rewardIsCalculable &&
+            math.rewardValuePaise === 0 &&
+            expense.rewardExplain &&
+            instrument && (
+              <Tooltip content={expense.rewardExplain}>
+                <span className="mt-0.5 block text-[0.6875rem] text-ink-3">
+                  {rewardIsEstimate ? "no estimated reward" : "no reward"}
+                </span>
+              </Tooltip>
+            )}
+          {instrument && !rewardIsCalculable && (
+            <Tooltip content="LedgerKit does not calculate this card's reward. Check the issuer statement for actual points or cashback.">
+              <span className="mt-0.5 inline-flex items-center gap-1 text-[0.6875rem] text-accent">
+                <BookOpen className="size-3" aria-hidden />
+                statement tracked
               </span>
             </Tooltip>
           )}

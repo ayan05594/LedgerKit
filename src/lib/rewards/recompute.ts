@@ -1,7 +1,5 @@
 import "server-only";
-import { and, asc, eq, gte, lte, inArray } from "drizzle-orm";
-import { db } from "@/db/client";
-import { expenses, instruments, refunds, rewardRules } from "@/db/schema";
+import { refunds } from "@/db/schema";
 import type { Instrument, RewardRule, Expense } from "@/db/schema";
 import {
   evaluateExpense,
@@ -15,6 +13,10 @@ import {
 } from "./engine";
 import { yearBounds, periodKey } from "./periods";
 import type { CapPeriod } from "./periods";
+import {
+  manualRewardOutcome,
+  rewardAutomationEnabled,
+} from "./coverage";
 import { requireUserId } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fromSupabaseRows, toSupabaseRow } from "@/lib/supabase/rows";
@@ -135,8 +137,19 @@ export async function recomputeInstrumentYear(instrumentId: string, year: number
   const userId = await requireUserId();
   const admin = createSupabaseAdminClient();
   const { start, end } = yearBounds(year);
-  const [instrumentResult, ruleResult, expenseResult] = await Promise.all([
-    admin.from("instruments").select("*").eq("id", instrumentId).maybeSingle(),
+  const instrumentResult = await admin
+    .from("instruments")
+    .select("*")
+    .eq("id", instrumentId)
+    .or(`is_catalog_card.eq.true,owner_user_id.eq.${userId}`)
+    .maybeSingle();
+  if (instrumentResult.error) throw instrumentResult.error;
+  const [inst] = fromSupabaseRows<Instrument>(
+    instrumentResult.data ? [instrumentResult.data] : [],
+  );
+  if (!inst || !rewardAutomationEnabled(inst)) return;
+
+  const [ruleResult, expenseResult] = await Promise.all([
     admin.from("reward_rules").select("*").eq("instrument_id", instrumentId),
     admin
       .from("expenses")
@@ -149,13 +162,9 @@ export async function recomputeInstrumentYear(instrumentId: string, year: number
       .order("created_at")
       .order("id"),
   ]);
-  const error = [instrumentResult, ruleResult, expenseResult]
+  const error = [ruleResult, expenseResult]
     .find((result) => result.error)?.error;
   if (error) throw error;
-  const [inst] = fromSupabaseRows<Instrument>(
-    instrumentResult.data ? [instrumentResult.data] : [],
-  );
-  if (!inst) return;
 
   const rules = fromSupabaseRows<RewardRule>(ruleResult.data).map(toEngineRule);
   const rows = fromSupabaseRows<Expense>(expenseResult.data);
@@ -226,8 +235,15 @@ export async function recomputeForDate(instrumentId: string | null, dateISO: str
 
 export async function recomputeAll(year?: number) {
   const y = year ?? new Date().getFullYear();
-  const all = await db.select().from(instruments);
-  for (const inst of all) await recomputeInstrumentYear(inst.id, y);
+  const userId = await requireUserId();
+  const selectionResult = await createSupabaseAdminClient()
+    .from("user_card_selections")
+    .select("instrument_id")
+    .eq("user_id", userId);
+  if (selectionResult.error) throw selectionResult.error;
+  for (const row of selectionResult.data ?? []) {
+    await recomputeInstrumentYear(String(row.instrument_id), y);
+  }
 }
 
 /** Build a cap ledger for reporting without writing anything. */
@@ -235,36 +251,55 @@ export async function capLedgerFor(
   instrumentId: string,
   year: number,
   authenticatedUserId?: string,
-): Promise<{ ledger: CapLedger; inst: EngineInstrument; rules: EngineRule[] } | null> {
+): Promise<{
+  ledger: CapLedger;
+  inst: EngineInstrument;
+  rules: EngineRule[];
+  automated: boolean;
+} | null> {
   const userId = authenticatedUserId ?? await requireUserId();
-  const [inst] = await db
-    .select()
-    .from(instruments)
-    .where(eq(instruments.id, instrumentId))
-    .limit(1);
+  const admin = createSupabaseAdminClient();
+  const instrumentResult = await admin
+    .from("instruments")
+    .select("*")
+    .eq("id", instrumentId)
+    .or(`is_catalog_card.eq.true,owner_user_id.eq.${userId}`)
+    .maybeSingle();
+  if (instrumentResult.error) throw instrumentResult.error;
+  const [inst] = fromSupabaseRows<Instrument>(
+    instrumentResult.data ? [instrumentResult.data] : [],
+  );
   if (!inst) return null;
 
-  const rules = (await db
-    .select()
-    .from(rewardRules)
-    .where(eq(rewardRules.instrumentId, instrumentId)))
-    .map(toEngineRule);
+  const engineInst = toEngineInstrument(inst);
+  if (!rewardAutomationEnabled(inst)) {
+    return {
+      ledger: newCapLedger(),
+      inst: engineInst,
+      rules: [],
+      automated: false,
+    };
+  }
 
   const { start, end } = yearBounds(year);
-  const rows = await db
-    .select()
-    .from(expenses)
-    .where(
-      and(
-        eq(expenses.userId, userId),
-        eq(expenses.instrumentId, instrumentId),
-        gte(expenses.occurredAt, start),
-        lte(expenses.occurredAt, end),
-      ),
-    )
-    .orderBy(asc(expenses.occurredAt), asc(expenses.createdAt), asc(expenses.id));
+  const [ruleResult, expenseResult] = await Promise.all([
+    admin.from("reward_rules").select("*").eq("instrument_id", instrumentId),
+    admin
+      .from("expenses")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("instrument_id", instrumentId)
+      .gte("occurred_at", start)
+      .lte("occurred_at", end)
+      .order("occurred_at")
+      .order("created_at")
+      .order("id"),
+  ]);
+  if (ruleResult.error) throw ruleResult.error;
+  if (expenseResult.error) throw expenseResult.error;
+  const rules = fromSupabaseRows<RewardRule>(ruleResult.data).map(toEngineRule);
+  const rows = fromSupabaseRows<Expense>(expenseResult.data);
 
-  const engineInst = toEngineInstrument(inst);
   const refunded = await refundMap(rows.map((r) => r.id), userId);
   const ledger = newCapLedger();
   for (const row of rows) {
@@ -275,7 +310,7 @@ export async function capLedgerFor(
       ledger,
     );
   }
-  return { ledger, inst: engineInst, rules };
+  return { ledger, inst: engineInst, rules, automated: true };
 }
 
 export async function capsForInstrument(
@@ -288,7 +323,7 @@ export async function capsForInstrument(
     Number(dateISO.slice(0, 4)),
     authenticatedUserId,
   );
-  if (!built) return [];
+  if (!built?.automated) return [];
   return capStatusFor(built.inst, built.rules, built.ledger, dateISO);
 }
 
@@ -303,7 +338,11 @@ export async function capsForInstruments(
   const result = new Map<string, CapStatus[]>();
   if (!instrumentRows.length) return result;
 
-  const ids = instrumentRows.map((instrument) => instrument.id);
+  for (const instrument of instrumentRows) result.set(instrument.id, []);
+  const automatedRows = instrumentRows.filter(rewardAutomationEnabled);
+  if (!automatedRows.length) return result;
+
+  const ids = automatedRows.map((instrument) => instrument.id);
   const { start, end } = yearBounds(Number(dateISO.slice(0, 4)));
   const admin = createSupabaseAdminClient();
   const [ruleResult, expenseResult] = await Promise.all([
@@ -343,7 +382,7 @@ export async function capsForInstruments(
     expensesByInstrument.set(row.instrumentId, rows);
   }
 
-  for (const row of instrumentRows) {
+  for (const row of automatedRows) {
     const instrument = toEngineInstrument(row);
     const rules = rulesByInstrument.get(row.id) ?? [];
     const ledger = newCapLedger();
@@ -377,21 +416,33 @@ export async function previewReward(input: {
   excludeExpenseId?: string;
 }) {
   const userId = await requireUserId();
-  const built = await capLedgerFor(input.instrumentId, Number(input.occurredAt.slice(0, 4)));
+  const built = await capLedgerFor(
+    input.instrumentId,
+    Number(input.occurredAt.slice(0, 4)),
+    userId,
+  );
   if (!built) return null;
+  if (!built.automated) {
+    return {
+      ...manualRewardOutcome(),
+      rewardUnit: built.inst.rewardUnit,
+      unitValuePaise: built.inst.unitValuePaise,
+      caps: [],
+    };
+  }
 
   // If we are editing an existing expense, roll its consumption back out first.
   if (input.excludeExpenseId) {
-    const [existing] = await db
-      .select()
-      .from(expenses)
-      .where(
-        and(
-          eq(expenses.id, input.excludeExpenseId),
-          eq(expenses.userId, userId),
-        ),
-      )
-      .limit(1);
+    const existingResult = await createSupabaseAdminClient()
+      .from("expenses")
+      .select("*")
+      .eq("id", input.excludeExpenseId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (existingResult.error) throw existingResult.error;
+    const [existing] = fromSupabaseRows<Expense>(
+      existingResult.data ? [existingResult.data] : [],
+    );
     if (existing?.rewardUnitsMilli) {
       const rule = built.rules.find((r) => r.id === existing.rewardRuleId);
       if (rule) {
@@ -400,6 +451,20 @@ export async function previewReward(input: {
         built.ledger.set(
           key,
           Math.max(0, (built.ledger.get(key) ?? 0) - existing.rewardUnitsMilli),
+        );
+      }
+      if (built.inst.overallCapUnits != null) {
+        const cardKey = `card:${built.inst.id}:${periodKey(
+          built.inst.overallCapPeriod,
+          existing.occurredAt,
+          built.inst.statementDay,
+        )}`;
+        built.ledger.set(
+          cardKey,
+          Math.max(
+            0,
+            (built.ledger.get(cardKey) ?? 0) - existing.rewardUnitsMilli,
+          ),
         );
       }
     }

@@ -36,6 +36,48 @@
       "when": 1788723521222,
       "tag": "20260907090000_standalone_reimbursements",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788820854825,
+      "tag": "20260908120000_card_catalog_onboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788843600000,
+      "tag": "20260908183000_tenant_isolation",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788845400000,
+      "tag": "20260908190000_align_rls_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788846000000,
+      "tag": "20260908191000_atomic_reimbursement_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788846600000,
+      "tag": "20260908192000_partial_reward_calculators",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788847800000,
+      "tag": "20260908194000_user_owned_manual_cards",
+      "breakpoints": true
     }
   ]
 }

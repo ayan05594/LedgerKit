@@ -26,8 +26,9 @@ import {
   XAxis,
 } from "recharts";
 import { motion, useReducedMotion } from "motion/react";
-import { useLoadDemo, useSummary } from "@/lib/client-api";
+import { useSummary } from "@/lib/client-api";
 import { formatMoney, formatMoneyShort, formatMoneyWhole } from "@/lib/money";
+import { rewardAutomationEnabled } from "@/lib/rewards/coverage";
 import { addMonths, formatDateShort, monthName } from "@/lib/rewards/periods";
 import { CardTile } from "@/components/dashboard/card-tile";
 import { CategoryIcon } from "@/components/expenses/category-picker";
@@ -52,12 +53,51 @@ export default function DashboardPage() {
     cursor.year,
     cursor.month,
   );
-  const loadDemo = useLoadDemo();
   const sheet = useExpenseSheet();
   const reduce = useReducedMotion();
 
   const summary = data?.summary;
   const totals = summary?.totals;
+  const statementTrackedSpendCount =
+    summary?.cards.reduce(
+      (count, card) =>
+        rewardAutomationEnabled(card.instrument)
+          ? count
+          : count + card.txnCount,
+      0,
+    ) ?? 0;
+  const automatedRewardValuePaise =
+    summary?.cards.reduce(
+      (value, card) =>
+        rewardAutomationEnabled(card.instrument)
+          ? value + card.rewardValuePaise
+          : value,
+      0,
+    ) ?? 0;
+  const automatedRewardLostPaise =
+    summary?.cards.reduce(
+      (value, card) =>
+        rewardAutomationEnabled(card.instrument)
+          ? value + card.rewardLostPaise
+          : value,
+      0,
+    ) ?? 0;
+  const estimatedRewardSpendCount =
+    summary?.cards.reduce(
+      (count, card) =>
+        card.instrument.rewardCoverage === "partial"
+          ? count + card.txnCount
+          : count,
+      0,
+    ) ?? 0;
+  const knownBenefitsRatePct =
+    totals && totals.grossPaise > 0
+      ? ((totals.instantDiscountPaise +
+          totals.deferredBenefitPaise +
+          automatedRewardValuePaise) /
+          totals.grossPaise) *
+        100
+      : 0;
   const isCurrentMonth =
     cursor.year === now.getFullYear() && cursor.month === now.getMonth() + 1;
 
@@ -152,20 +192,11 @@ export default function DashboardPage() {
           <EmptyState
             icon={<Wallet className="size-5" />}
             title="Nothing logged for this month yet"
-            body="Add your first expense, or drop in a few weeks of sample transactions to see how the reward engine handles caps on each card."
+            body="Add your first expense to start tracking spending, reimbursements and any supported card reward estimates."
             action={
-              <div className="flex flex-wrap justify-center gap-2">
-                <Button variant="primary" onClick={sheet.openNew}>
-                  Add an expense
-                </Button>
-                <Button
-                  variant="secondary"
-                  loading={loadDemo.isPending}
-                  onClick={() => loadDemo.mutate({})}
-                >
-                  Load sample data
-                </Button>
-              </div>
+              <Button variant="primary" onClick={sheet.openNew}>
+                Add an expense
+              </Button>
             }
           />
         </Panel>
@@ -194,23 +225,56 @@ export default function DashboardPage() {
               tooltip="What you spent after instant discounts, refunds and money already reimbursed."
             />
             <Figure
-              label="Rewards earned"
-              value={formatMoneyWhole(totals.rewardValuePaise)}
+              label={
+                statementTrackedSpendCount > 0
+                  ? "Automated rewards"
+                  : estimatedRewardSpendCount > 0
+                    ? "Estimated rewards"
+                  : "Rewards earned"
+              }
+              value={
+                statementTrackedSpendCount > 0 &&
+                automatedRewardValuePaise === 0
+                  ? "Check statements"
+                  : formatMoneyWhole(automatedRewardValuePaise)
+              }
               sub={
-                totals.rewardLostToCapPaise > 0
-                  ? `${formatMoney(totals.rewardLostToCapPaise)} lost to caps`
-                  : "nothing lost to caps"
+                statementTrackedSpendCount > 0
+                  ? `${statementTrackedSpendCount} ${
+                      statementTrackedSpendCount === 1
+                        ? "expense needs"
+                        : "expenses need"
+                    } a statement check`
+                  : estimatedRewardSpendCount > 0
+                    ? `${estimatedRewardSpendCount} ${
+                        estimatedRewardSpendCount === 1 ? "expense uses" : "expenses use"
+                      } partial card coverage`
+                  : automatedRewardLostPaise > 0
+                    ? `${formatMoney(automatedRewardLostPaise)} lost to caps`
+                    : "nothing lost to caps"
               }
               tone="gain"
               icon={<Sparkles className="size-4" />}
-              tooltip="Cashback and points your cards paid on this month's spending, after every cap."
+              tooltip={
+                statementTrackedSpendCount > 0
+                  ? "Calculated for cards with supported exact or partial coverage. Partial figures are estimates; manual card rewards are not included."
+                  : estimatedRewardSpendCount > 0
+                    ? "An estimate from the supported rules on cards with partial reward coverage. Confirm final rewards on issuer statements."
+                    : "Cashback and points your cards paid on this month's spending, after every cap."
+              }
             />
             <Figure
               label="Discounts claimed"
               value={formatMoneyWhole(
                 totals.instantDiscountPaise + totals.deferredBenefitPaise,
               )}
-              sub={`${totals.savingsRatePct.toFixed(1)}% of gross clawed back`}
+              sub={
+                statementTrackedSpendCount > 0
+                  ? `${knownBenefitsRatePct.toFixed(1)}% of gross from known benefits`
+                  : estimatedRewardSpendCount > 0
+                    ? `${knownBenefitsRatePct.toFixed(1)}% of gross from known and estimated benefits`
+                  : `${totals.savingsRatePct.toFixed(1)}% of gross clawed back`
+              }
               tone="gain"
               icon={<Coins className="size-4" />}
               tooltip="Coupons, bank offers and extra cashback you logged by hand."

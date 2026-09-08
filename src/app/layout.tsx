@@ -8,7 +8,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "LedgerKit — spend and rewards",
   description:
-    "Track spending across six Indian cards, see what each one actually earned after caps, and chase down every refund and reimbursement.",
+    "Track spending across your Indian credit cards, see what each one actually earned after caps, and chase down every refund and reimbursement.",
 };
 
 export const viewport: Viewport = {

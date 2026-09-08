@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   BarChart3,
@@ -20,7 +19,6 @@ import {
 type Mode = "login" | "register";
 
 export function AuthForm({ mode }: { mode: Mode }) {
-  const router = useRouter();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
@@ -58,8 +56,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
         setError(payload.error ?? "Something went wrong.");
         return;
       }
-      router.replace(payload.data?.redirectTo ?? "/");
-      router.refresh();
+      // Cross the authentication boundary with a full navigation so fresh
+      // cookies and a new React Query cache are guaranteed for this user.
+      window.location.assign(payload.data?.redirectTo ?? "/");
     } catch {
       setError("Could not reach LedgerKit. Check your connection and try again.");
     } finally {
@@ -98,8 +97,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
             </div>
 
             <form className="space-y-4" onSubmit={submit}>
-              <Field label="Email address">
+              <Field label="Email address" htmlFor="auth-email">
                 <input
+                  id="auth-email"
+                  name="email"
                   className="field h-12 bg-[#fbfbfc]"
                   type="email"
                   autoComplete="email"
@@ -110,9 +111,15 @@ export function AuthForm({ mode }: { mode: Mode }) {
                 />
               </Field>
 
-              <Field label="Password" hint={register ? "6 characters minimum" : undefined}>
+              <Field
+                label="Password"
+                htmlFor="auth-password"
+                hint={register ? "6 characters minimum" : undefined}
+              >
                 <div className="relative">
                   <input
+                    id="auth-password"
+                    name="password"
                     className="field h-12 bg-[#fbfbfc] pr-12"
                     type={showPassword ? "text" : "password"}
                     autoComplete={register ? "new-password" : "current-password"}
@@ -135,8 +142,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
               {register && (
                 <>
-                  <Field label="Confirm password">
+                  <Field label="Confirm password" htmlFor="auth-confirm-password">
                     <input
+                      id="auth-confirm-password"
+                      name="confirmPassword"
                       className="field h-12 bg-[#fbfbfc]"
                       type={showPassword ? "text" : "password"}
                       autoComplete="new-password"
@@ -147,8 +156,13 @@ export function AuthForm({ mode }: { mode: Mode }) {
                       required
                     />
                   </Field>
-                  <Field label="Registration secret">
+                  <Field
+                    label="Registration secret"
+                    htmlFor="auth-registration-secret"
+                  >
                     <input
+                      id="auth-registration-secret"
+                      name="registrationSecret"
                       className="field h-12 bg-[#fbfbfc]"
                       type="password"
                       autoComplete="off"
@@ -318,20 +332,22 @@ function Metric({
 
 function Field({
   label,
+  htmlFor,
   hint,
   children,
 }: {
   label: string;
+  htmlFor?: string;
   hint?: string;
   children: React.ReactNode;
 }) {
   return (
-    <label className="block">
-      <span className="mb-1.5 flex items-center justify-between text-[0.8125rem] font-semibold text-ink">
-        {label}
+    <div className="block">
+      <div className="mb-1.5 flex items-center justify-between text-[0.8125rem] font-semibold text-ink">
+        <label htmlFor={htmlFor}>{label}</label>
         {hint && <span className="font-normal text-ink-3">{hint}</span>}
-      </span>
+      </div>
       {children}
-    </label>
+    </div>
   );
 }

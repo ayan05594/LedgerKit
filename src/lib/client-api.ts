@@ -26,6 +26,7 @@ import type {
   StandaloneReimbursementRow as ServerStandaloneReimbursementRow,
 } from "@/server/queries";
 import type { RewardOutcome, CapStatus } from "@/lib/rewards/engine";
+import type { CardCatalogItem } from "@/lib/card-catalog";
 
 async function request<T>(
   url: string,
@@ -126,6 +127,12 @@ export interface ReferenceData {
   accountBalances: AccountBalance[];
 }
 
+export interface CardSelectionData {
+  catalog: CardCatalogItem[];
+  selectedIds: string[];
+  completed: boolean;
+}
+
 export type RewardPreview = RewardOutcome & {
   rewardUnit: string;
   unitValuePaise: number;
@@ -147,6 +154,7 @@ export const keys = {
   people: ["people"] as const,
   transfers: ["transfers"] as const,
   pending: ["pending"] as const,
+  cardSelection: ["card-selection"] as const,
 };
 
 export function useReference(enabled = true) {
@@ -216,6 +224,15 @@ export function usePending() {
   return useQuery({
     queryKey: keys.pending,
     queryFn: () => request<PendingSummary>("/api/pending"),
+  });
+}
+
+export function useCardSelection(enabled = true) {
+  return useQuery({
+    queryKey: keys.cardSelection,
+    queryFn: () => request<CardSelectionData>("/api/card-selection"),
+    staleTime: 60_000,
+    enabled,
   });
 }
 
@@ -358,6 +375,33 @@ export function useRecordStandaloneReimbursementReceipt() {
     ({ id, ...json }: { id: string } & Record<string, unknown>) =>
       request(`/api/reimbursements/${id}/receipts`, { method: "POST", json }),
     "Payment recorded",
+  );
+}
+
+export function useSaveCardSelection() {
+  return useWrite(
+    (json: { instrumentIds: string[]; noCards: boolean }) =>
+      request<{
+        selectedIds: string[];
+        completed: true;
+        redirectTo?: string;
+      }>("/api/card-selection", { method: "PUT", json }),
+    "Card choices saved",
+  );
+}
+
+export function useCreateManualCard() {
+  return useWrite(
+    (json: {
+      issuer: string;
+      name: string;
+      network: "visa" | "mastercard" | "rupay" | "amex" | "diners" | "other";
+    }) =>
+      request<CardCatalogItem>("/api/card-selection/manual", {
+        method: "POST",
+        json,
+      }),
+    "Manual card added",
   );
 }
 

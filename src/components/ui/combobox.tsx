@@ -27,6 +27,8 @@ export function Combobox({
   clearLabel = "None",
   disabled,
   id,
+  name,
+  ariaLabel,
 }: {
   options: ComboOption[];
   value: string | null;
@@ -39,6 +41,8 @@ export function Combobox({
   clearLabel?: string;
   disabled?: boolean;
   id?: string;
+  name?: string;
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -62,6 +66,8 @@ export function Combobox({
       <PopoverPrimitive.Trigger asChild>
         <button
           id={id}
+          name={name}
+          aria-label={ariaLabel}
           type="button"
           disabled={disabled}
           className="field flex items-center justify-between gap-2 text-left disabled:cursor-not-allowed"
@@ -93,6 +99,7 @@ export function Combobox({
             <div className="flex items-center gap-2 border-b border-rule px-3">
               <Search className="size-3.5 shrink-0 text-ink-3" aria-hidden />
               <Command.Input
+                aria-label={`Search ${ariaLabel ?? placeholder}`}
                 value={query}
                 onValueChange={setQuery}
                 placeholder={placeholder}

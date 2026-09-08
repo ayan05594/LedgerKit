@@ -40,6 +40,10 @@ function isActive(href: string, pathname: string) {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const isBarePage =
+    pathname === "/login" ||
+    pathname === "/register" ||
+    pathname.startsWith("/onboarding/");
   const [moreOpen, setMoreOpen] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
   const [signingOut, setSigningOut] = React.useState(false);
@@ -47,6 +51,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   React.useEffect(() => setMoreOpen(false), [pathname]);
 
   React.useEffect(() => {
+    if (isBarePage) return;
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       const typing =
@@ -63,7 +68,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [isBarePage]);
 
   async function signOut() {
     setSigningOut(true);
@@ -74,7 +79,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }
 
-  if (pathname === "/login" || pathname === "/register") {
+  if (isBarePage) {
     return <>{children}</>;
   }
 

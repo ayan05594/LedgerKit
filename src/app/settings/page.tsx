@@ -1,15 +1,22 @@
 "use client";
 
 import * as React from "react";
-import { Database, Plus, Tag, Trash2, TriangleAlert } from "lucide-react";
 import {
+  CreditCard,
+  Plus,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
+import {
+  useCardSelection,
   useClearTransactions,
   useCreateCategory,
   useCreateMerchant,
   useCreatePaymentApp,
-  useLoadDemo,
   useReference,
+  useSaveCardSelection,
 } from "@/lib/client-api";
+import { CardSelectionPicker } from "@/components/cards/card-selection";
 import { CategoryIcon } from "@/components/expenses/category-picker";
 import {
   Button,
@@ -19,6 +26,7 @@ import {
   Input,
   Panel,
   Select,
+  Sheet,
   Spinner,
 } from "@/components/ui/primitives";
 import { DataLoadError } from "@/components/ui/data-load-error";
@@ -31,7 +39,14 @@ export default function SettingsPage() {
     isFetching,
     refetch,
   } = useReference();
-  const loadDemo = useLoadDemo();
+  const {
+    data: cardSelection,
+    error: cardSelectionError,
+    isLoading: isCardSelectionLoading,
+    isFetching: isCardSelectionFetching,
+    refetch: refetchCardSelection,
+  } = useCardSelection();
+  const saveCardSelection = useSaveCardSelection();
   const clearTransactions = useClearTransactions();
   const createCategory = useCreateCategory();
   const createMerchant = useCreateMerchant();
@@ -40,6 +55,9 @@ export default function SettingsPage() {
   const [categoryOpen, setCategoryOpen] = React.useState(false);
   const [merchantOpen, setMerchantOpen] = React.useState(false);
   const [appOpen, setAppOpen] = React.useState(false);
+  const [cardsOpen, setCardsOpen] = React.useState(false);
+  const [draftCardIds, setDraftCardIds] = React.useState<string[]>([]);
+  const [draftNoCards, setDraftNoCards] = React.useState(false);
 
   if (error) {
     return (
@@ -75,6 +93,95 @@ export default function SettingsPage() {
           you want a clean slate.
         </p>
       </header>
+
+      <div id="my-cards" className="scroll-mt-5">
+        <Panel
+          title="My cards"
+          subtitle="These are the only cards shown while logging an expense"
+          action={
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!cardSelection}
+              onClick={openCardManager}
+            >
+              <CreditCard className="size-3.5" />
+              Manage cards
+            </Button>
+          }
+        >
+          {cardSelectionError ? (
+            <div className="flex flex-col gap-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[0.8125rem] font-medium">
+                  Your card choices could not be loaded
+                </p>
+                <p className="hint mt-0.5">{cardSelectionError.message}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={isCardSelectionFetching}
+                onClick={() => void refetchCardSelection()}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : isCardSelectionLoading || !cardSelection ? (
+            <div className="flex items-center gap-2 py-2 text-[0.8125rem] text-ink-2">
+              <Spinner />
+              Loading your wallet…
+            </div>
+          ) : cardSelection.selectedIds.length === 0 ? (
+            <div className="flex flex-col gap-3 rounded-[11px] border border-dashed border-rule-strong bg-paper px-4 py-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex gap-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-sunken text-ink-3">
+                  <CreditCard className="size-4" />
+                </span>
+                <div>
+                  <p className="text-[0.875rem] font-semibold">
+                    No credit cards in your wallet
+                  </p>
+                  <p className="hint mt-0.5">
+                    Add one whenever you want LedgerKit to track its rewards.
+                  </p>
+                </div>
+              </div>
+              <Button size="sm" variant="secondary" onClick={openCardManager}>
+                Choose cards
+              </Button>
+            </div>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {cardSelection.catalog
+                .filter((card) => cardSelection.selectedIds.includes(card.id))
+                .map((card) => (
+                  <div
+                    key={card.id}
+                    className="flex min-w-0 items-center gap-3 rounded-[11px] border border-rule-strong bg-paper p-3"
+                  >
+                    <span
+                      className="flex h-9 w-14 shrink-0 items-end rounded-[7px] p-1.5 text-white shadow-sm"
+                      style={{
+                        background: `linear-gradient(135deg, ${card.colorFrom}, ${card.colorTo})`,
+                      }}
+                    >
+                      <CreditCard className="size-3 text-white/80" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[0.8125rem] font-semibold">
+                        {card.shortName}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[0.6875rem] text-ink-3">
+                        {card.issuer} · {card.network.toUpperCase()}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+            </div>
+          )}
+        </Panel>
+      </div>
 
       <Panel
         title="Categories"
@@ -179,39 +286,102 @@ export default function SettingsPage() {
         </Panel>
       </div>
 
-      <Panel title="Your data" subtitle="Everything lives in a local SQLite file">
+      <Panel
+        title="Your data"
+        subtitle="Stored securely in your private Supabase database"
+      >
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="secondary"
-            loading={loadDemo.isPending}
-            onClick={() => loadDemo.mutate({})}
-          >
-            <Database className="size-3.5" />
-            Load sample transactions
-          </Button>
           <Button variant="danger" onClick={() => setConfirmClear(true)}>
             <Trash2 className="size-3.5" />
             Clear all transactions
           </Button>
         </div>
         <p className="hint mt-3">
-          Clearing removes every expense, adjustment, refund and transfer. Your cards,
-          reward rules, accounts and people stay as they are.
+          Clearing removes every expense, adjustment, refund and transfer. Your card
+          choices, accounts and people stay as they are.
         </p>
       </Panel>
 
-      <Panel title="A note on the seeded rates">
+      <Panel title="About card information">
         <div className="flex gap-2.5">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warn" />
+          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-gain" />
           <p className="text-[0.8438rem] leading-relaxed text-ink-2">
-            Every rate, cap and exclusion was seeded from published card terms, but
-            issuers revise these often and some are worded as &ldquo;up to&rdquo;
-            figures that depend on your tier or membership. Check each card&rsquo;s page
-            against your own statement and edit anything that does not match — the
-            engine only knows what you tell it.
+            Catalogue details are sourced from official issuer pages and carry a
+            verification date. Banks can revise rates, caps and eligibility at any
+            time, so use the source link on a card page to confirm the latest terms
+            before making a financial decision.
           </p>
         </div>
       </Panel>
+
+      <Sheet
+        open={cardsOpen}
+        onOpenChange={(nextOpen) => {
+          setCardsOpen(nextOpen);
+          if (!nextOpen) saveCardSelection.reset();
+        }}
+        title="Choose your credit cards"
+        description="Your expense form and rewards dashboard will only show the cards saved here."
+        width="780px"
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                saveCardSelection.reset();
+                setCardsOpen(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={draftCardIds.length === 0 && !draftNoCards}
+              loading={saveCardSelection.isPending}
+              onClick={() =>
+                saveCardSelection.mutate(
+                  {
+                    instrumentIds: draftCardIds,
+                    noCards: draftNoCards,
+                  },
+                  {
+                    onSuccess: () => {
+                      saveCardSelection.reset();
+                      setCardsOpen(false);
+                    },
+                  },
+                )
+              }
+            >
+              Save wallet
+            </Button>
+          </>
+        }
+      >
+        {cardSelection && (
+          <CardSelectionPicker
+            catalog={cardSelection.catalog}
+            selectedIds={draftCardIds}
+            noCards={draftNoCards}
+            onSelectedIdsChange={(ids) => {
+              saveCardSelection.reset();
+              setDraftCardIds(ids);
+            }}
+            onNoCardsChange={(value) => {
+              saveCardSelection.reset();
+              setDraftNoCards(value);
+            }}
+          />
+        )}
+        {saveCardSelection.error && (
+          <p
+            role="alert"
+            className="mt-4 rounded-[9px] border border-alert/25 bg-alert-soft px-3 py-2 text-[0.8125rem] text-alert"
+          >
+            {saveCardSelection.error.message}
+          </p>
+        )}
+      </Sheet>
 
       <Dialog
         open={confirmClear}
@@ -277,6 +447,15 @@ export default function SettingsPage() {
   }
   function createAppHandler(values: { name: string; color: string }) {
     createApp.mutate({ name: values.name, colorHex: values.color });
+  }
+
+  function openCardManager() {
+    if (!cardSelection) return;
+    setDraftCardIds(cardSelection.selectedIds);
+    setDraftNoCards(
+      cardSelection.completed && cardSelection.selectedIds.length === 0,
+    );
+    setCardsOpen(true);
   }
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   CreditCard,
   Globe,
@@ -80,6 +81,7 @@ interface FormState {
   merchantName: string;
   description: string;
   notes: string;
+  rewardOverrideAmount: string;
   flags: Record<string, boolean>;
   reimbursable: boolean;
   reimbursementMode: "full" | "partial";
@@ -103,6 +105,7 @@ const blank = (): FormState => ({
   merchantName: "",
   description: "",
   notes: "",
+  rewardOverrideAmount: "",
   flags: {},
   reimbursable: false,
   reimbursementMode: "full",
@@ -122,6 +125,7 @@ export function ExpenseSheet({
   expenseId?: string | null;
 }) {
   const editing = !!expenseId;
+  const formId = React.useId();
   const {
     data: reference,
     error: referenceError,
@@ -130,6 +134,17 @@ export function ExpenseSheet({
     refetch: refetchReference,
   } = useReference(open);
   const { data: existing } = useExpense(open && expenseId ? expenseId : null);
+  const availableInstruments = React.useMemo(() => {
+    const cards = [...(reference?.instruments ?? [])];
+    if (
+      existing?.instrument &&
+      !cards.some((card) => card.id === existing.instrument?.id)
+    ) {
+      cards.unshift(existing.instrument);
+    }
+    return cards;
+  }, [existing?.instrument, reference?.instruments]);
+  const canUseCard = availableInstruments.length > 0;
 
   const [form, setForm] = React.useState<FormState>(blank);
   const [draftAdjustments, setDraftAdjustments] = React.useState<DraftAdjustment[]>([]);
@@ -181,6 +196,8 @@ export function ExpenseSheet({
       merchantName: e.merchantName,
       description: e.description,
       notes: e.notes,
+      rewardOverrideAmount:
+        e.rewardOverridePaise == null ? "" : String(e.rewardOverridePaise / 100),
       flags: safeFlags(e.flags),
       reimbursable: e.reimbursable,
       reimbursementMode:
@@ -202,9 +219,38 @@ export function ExpenseSheet({
     );
   }, [open, editing, existing]);
 
+  React.useEffect(() => {
+    if (!open || editing || !reference || reference.instruments.length > 0) return;
+    setForm((current) => {
+      if (current.payerKind !== "card") return current;
+      return {
+        ...current,
+        payerKind: "account",
+        instrumentId: null,
+        accountId: current.accountId ?? reference.accounts[0]?.id ?? null,
+      };
+    });
+  }, [editing, open, reference]);
+
   /* ------------------------------------------------------- reward preview */
 
   const amountPaise = toPaise(form.amount);
+  const selectedCard = availableInstruments.find((i) => i.id === form.instrumentId);
+  const rewardIsCalculable =
+    selectedCard?.rewardCoverage === "exact" ||
+    selectedCard?.rewardCoverage === "partial";
+  const rewardIsEstimate = selectedCard?.rewardCoverage === "partial";
+  const usesManualReward =
+    form.payerKind === "card" && selectedCard?.rewardCoverage === "manual";
+  const rewardOverrideRaw = form.rewardOverrideAmount.trim();
+  const rewardOverridePaise =
+    usesManualReward && rewardOverrideRaw !== ""
+      ? toPaise(rewardOverrideRaw)
+      : null;
+  const rewardOverrideValid =
+    !usesManualReward ||
+    rewardOverrideRaw === "" ||
+    (Number.isFinite(Number(rewardOverrideRaw)) && Number(rewardOverrideRaw) >= 0);
   const previewKey = [
     form.instrumentId,
     amountPaise,
@@ -218,8 +264,14 @@ export function ExpenseSheet({
 
   React.useEffect(() => {
     if (!open) return;
-    if (!form.instrumentId || amountPaise <= 0 || !form.categorySlug) {
+    if (
+      !form.instrumentId ||
+      !rewardIsCalculable ||
+      amountPaise <= 0 ||
+      !form.categorySlug
+    ) {
       setPreview(null);
+      setPreviewing(false);
       return;
     }
     let cancelled = false;
@@ -249,7 +301,7 @@ export function ExpenseSheet({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, previewKey]);
+  }, [open, previewKey, rewardIsCalculable]);
 
   /* ------------------------------------------------------------ derived */
 
@@ -257,17 +309,15 @@ export function ExpenseSheet({
   const selectedCategory = categories.find((c) => c.slug === form.categorySlug);
   const needsLabel = !!selectedCategory?.requiresLabel;
 
-  const selectedCard = reference?.instruments.find((i) => i.id === form.instrumentId);
-
   const cardFlags = React.useMemo<CardFlag[]>(() => {
-    if (!selectedCard) return [];
+    if (!selectedCard || !rewardIsCalculable) return [];
     try {
       const options = JSON.parse(selectedCard.options) as { flags?: CardFlag[] };
       return Array.isArray(options.flags) ? options.flags : [];
     } catch {
       return [];
     }
-  }, [selectedCard]);
+  }, [selectedCard, rewardIsCalculable]);
 
   // Pre-fill each answer from the card's own default the first time it applies.
   React.useEffect(() => {
@@ -285,7 +335,7 @@ export function ExpenseSheet({
     });
   }, [cardFlags]);
   const cardExcluded = React.useMemo(() => {
-    if (!selectedCard) return false;
+    if (!selectedCard || !rewardIsCalculable) return false;
     try {
       return (JSON.parse(selectedCard.excludedCategories) as string[]).includes(
         form.categorySlug,
@@ -293,7 +343,7 @@ export function ExpenseSheet({
     } catch {
       return false;
     }
-  }, [selectedCard, form.categorySlug]);
+  }, [selectedCard, rewardIsCalculable, form.categorySlug]);
 
   const reimbursementPaise =
     form.reimbursementMode === "full"
@@ -305,6 +355,7 @@ export function ExpenseSheet({
     !!form.categorySlug &&
     (form.payerKind === "card" ? !!form.instrumentId : !!form.accountId) &&
     (!needsLabel || form.customLabel.trim().length > 0) &&
+    rewardOverrideValid &&
     (!form.reimbursable || (reimbursementPaise > 0 && reimbursementPaise <= amountPaise));
 
   /* -------------------------------------------------------------- saving */
@@ -329,6 +380,7 @@ export function ExpenseSheet({
       reimbursementFrom: form.reimbursementFrom.trim(),
       reimbursementDueDate: form.reimbursementDueDate || null,
       reimbursementNote: form.reimbursementNote.trim(),
+      rewardOverridePaise,
     };
   }
 
@@ -338,23 +390,31 @@ export function ExpenseSheet({
       setError("Fill in the amount, category and where it was paid from.");
       return;
     }
-    if (editing && expenseId) {
-      await updateExpense.mutateAsync({ id: expenseId, ...payload() });
+    try {
+      if (editing && expenseId) {
+        await updateExpense.mutateAsync({ id: expenseId, ...payload() });
+        onOpenChange(false);
+        return;
+      }
+      const created = await createExpense.mutateAsync(payload());
+      for (const draft of draftAdjustments) {
+        await addAdjustment.mutateAsync({
+          expenseId: created.id,
+          label: draft.label,
+          kind: draft.kind,
+          amountPaise: draft.amountPaise,
+          immediate: draft.immediate,
+          status: draft.status,
+        });
+      }
       onOpenChange(false);
-      return;
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "The expense could not be saved. Please try again.",
+      );
     }
-    const created = await createExpense.mutateAsync(payload());
-    for (const draft of draftAdjustments) {
-      await addAdjustment.mutateAsync({
-        expenseId: created.id,
-        label: draft.label,
-        kind: draft.kind,
-        amountPaise: draft.amountPaise,
-        immediate: draft.immediate,
-        status: draft.status,
-      });
-    }
-    onOpenChange(false);
   }
 
   /* ------------------------------------------------------- adjustment ops */
@@ -416,9 +476,21 @@ export function ExpenseSheet({
       width="620px"
       title={editing ? "Edit expense" : "Add an expense"}
       description={
-        editing
-          ? "Change anything here and the rewards recalculate straight away."
-          : "Rewards are worked out live as you fill this in."
+        usesManualReward
+          ? editing
+            ? "Update the purchase and any reward confirmed on your issuer statement."
+            : "Log the purchase now, then record its reward once your issuer confirms it."
+          : rewardIsCalculable
+          ? rewardIsEstimate
+            ? editing
+              ? "Changes recalculate a partial-coverage reward estimate. Confirm it against your statement."
+              : "LedgerKit estimates this card's reward from partial coverage as you fill this in."
+            : editing
+              ? "Change anything here and the reward recalculates straight away."
+              : "This card's reward is worked out live as you fill this in."
+          : editing
+            ? "Update the purchase details. Statement-tracked rewards are not recalculated."
+            : "Log the purchase details. Supported card reward estimates update live when available."
       }
       footer={
         <>
@@ -482,19 +554,24 @@ export function ExpenseSheet({
         )}
 
         {error && (
-          <p className="rounded-[9px] border border-alert/25 bg-alert-soft px-3 py-2 text-[0.8125rem] text-alert">
+          <p
+            role="alert"
+            className="rounded-[9px] border border-alert/25 bg-alert-soft px-3 py-2 text-[0.8125rem] text-alert"
+          >
             {error}
           </p>
         )}
 
         {/* ---- amount and date ---- */}
         <div className="grid gap-3 sm:grid-cols-[1.4fr_1fr]">
-          <Field label="Amount" required>
+          <Field label="Amount" htmlFor={`${formId}-amount`} required>
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[1.0625rem] text-ink-3">
                 ₹
               </span>
               <Input
+                id={`${formId}-amount`}
+                name="amount"
                 autoFocus={!editing}
                 inputMode="decimal"
                 value={form.amount}
@@ -504,8 +581,10 @@ export function ExpenseSheet({
               />
             </div>
           </Field>
-          <Field label="Date" required>
+          <Field label="Date" htmlFor={`${formId}-date`} required>
             <Input
+              id={`${formId}-date`}
+              name="occurredAt"
               type="date"
               value={form.occurredAt}
               onChange={(e) => set("occurredAt", e.target.value)}
@@ -515,10 +594,13 @@ export function ExpenseSheet({
 
         {/* ---- paid from ---- */}
         <div>
-          <label className="field-label">Paid from</label>
+          <p id={`${formId}-payer-kind-label`} className="field-label">
+            Paid from
+          </p>
           <Segmented
             fullWidth
             className="mb-2"
+            ariaLabelledBy={`${formId}-payer-kind-label`}
             value={form.payerKind}
             onChange={(v) => {
               set("payerKind", v);
@@ -526,7 +608,12 @@ export function ExpenseSheet({
               else set("instrumentId", null);
             }}
             options={[
-              { value: "card", label: "Card", icon: <CreditCard className="size-3.5" /> },
+              {
+                value: "card",
+                label: "Card",
+                icon: <CreditCard className="size-3.5" />,
+                disabled: !canUseCard,
+              },
               {
                 value: "account",
                 label: "Bank account or UPI",
@@ -534,20 +621,53 @@ export function ExpenseSheet({
               },
             ]}
           />
-          {form.payerKind === "card" ? (
+          {!canUseCard && reference && (
+            <p className="mb-2 rounded-[9px] border border-rule bg-paper px-3 py-2 text-[0.75rem] text-ink-2">
+              No cards are selected. Use a bank account below or{" "}
+              <Link
+                href="/settings#my-cards"
+                onClick={() => onOpenChange(false)}
+                className="font-medium text-accent hover:underline"
+              >
+                manage your cards
+              </Link>
+              .
+            </p>
+          )}
+          {form.payerKind === "card" && canUseCard ? (
             <Combobox
+              id={`${formId}-instrument`}
+              name="instrumentId"
+              ariaLabel="Card used for this expense"
               placeholder="Which card?"
               value={form.instrumentId}
               onChange={(v) => set("instrumentId", v)}
-              options={(reference?.instruments ?? []).map((i) => ({
+              options={availableInstruments.map((i) => ({
                 value: i.id,
                 label: i.shortName,
                 hint: i.kind === "credit" ? "credit" : "debit",
                 color: i.colorFrom,
               }))}
             />
+          ) : reference && reference.accounts.length === 0 ? (
+            <div className="rounded-[10px] border border-dashed border-rule-strong bg-paper px-3 py-3 text-[0.8125rem] text-ink-2">
+              <p className="font-medium text-ink">No bank account or UPI source yet</p>
+              <p className="mt-0.5 text-[0.75rem] leading-relaxed text-ink-3">
+                Add one before logging an expense without a selected credit card.
+              </p>
+              <Link
+                href="/accounts"
+                onClick={() => onOpenChange(false)}
+                className="mt-2 inline-flex min-h-9 items-center font-semibold text-accent hover:underline"
+              >
+                Add an account
+              </Link>
+            </div>
           ) : (
             <Combobox
+              id={`${formId}-account`}
+              name="accountId"
+              ariaLabel="Account used for this expense"
               placeholder="Which account?"
               value={form.accountId}
               onChange={(v) => set("accountId", v)}
@@ -563,8 +683,14 @@ export function ExpenseSheet({
 
         {/* ---- how it was paid ---- */}
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Paid through" hint="Matters for SmartBuy, PayZapp and UPI rules">
+          <Field
+            label="Paid through"
+            htmlFor={`${formId}-payment-app`}
+            hint="Matters for SmartBuy, PayZapp and UPI rules"
+          >
             <Combobox
+              id={`${formId}-payment-app`}
+              name="paymentAppSlug"
               placeholder="App or method"
               allowClear
               clearLabel="Not recorded"
@@ -595,9 +721,13 @@ export function ExpenseSheet({
               }))}
             />
           </Field>
-          <Field label="Where">
+          <div>
+            <p id={`${formId}-channel-label`} className="field-label">
+              Where
+            </p>
             <Segmented
               fullWidth
+              ariaLabelledBy={`${formId}-channel-label`}
               value={form.channel}
               onChange={(v) => set("channel", v)}
               options={[
@@ -606,13 +736,19 @@ export function ExpenseSheet({
                 { value: "upi", label: "UPI", icon: <QrCode className="size-3.5" /> },
               ]}
             />
-          </Field>
+          </div>
         </div>
 
         {/* ---- merchant ---- */}
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Merchant" hint="Drives merchant-specific reward rates">
+          <Field
+            label="Merchant"
+            htmlFor={`${formId}-merchant`}
+            hint="Drives merchant-specific reward rates"
+          >
             <Combobox
+              id={`${formId}-merchant`}
+              name="merchantSlug"
               placeholder="Pick or add a merchant"
               allowClear
               clearLabel="No specific merchant"
@@ -644,8 +780,14 @@ export function ExpenseSheet({
               }))}
             />
           </Field>
-          <Field label="Description" hint="What was it for?">
+          <Field
+            label="Description"
+            htmlFor={`${formId}-description`}
+            hint="What was it for?"
+          >
             <Input
+              id={`${formId}-description`}
+              name="description"
               value={form.description}
               onChange={(e) => set("description", e.target.value)}
               placeholder="Optional"
@@ -655,10 +797,12 @@ export function ExpenseSheet({
 
         {/* ---- category ---- */}
         <div>
-          <label className="field-label">
+          <p id={`${formId}-category-label`} className="field-label">
             Category <span className="text-alert">*</span>
-          </label>
+          </p>
           <CategoryPicker
+            id={`${formId}-category`}
+            labelledBy={`${formId}-category-label`}
             categories={categories}
             value={form.categorySlug}
             onChange={(slug) => set("categorySlug", slug)}
@@ -667,10 +811,13 @@ export function ExpenseSheet({
             <div className="mt-2">
               <Field
                 label="What was this, exactly?"
+                htmlFor={`${formId}-custom-label`}
                 required
                 hint="Named so you can find it again later"
               >
                 <Input
+                  id={`${formId}-custom-label`}
+                  name="customLabel"
                   value={form.customLabel}
                   onChange={(e) => set("customLabel", e.target.value)}
                   placeholder="e.g. Passport renewal fee"
@@ -695,10 +842,16 @@ export function ExpenseSheet({
                 className="flex flex-wrap items-center justify-between gap-2 rounded-[11px] border border-rule-strong px-3 py-2.5"
               >
                 <div className="min-w-0">
-                  <p className="text-[0.875rem] font-medium">{flag.label}?</p>
+                  <p
+                    id={`${formId}-flag-${flag.key}`}
+                    className="text-[0.875rem] font-medium"
+                  >
+                    {flag.label}?
+                  </p>
                   {flag.hint && <p className="hint mt-0.5">{flag.hint}</p>}
                 </div>
                 <Segmented
+                  ariaLabelledBy={`${formId}-flag-${flag.key}`}
                   value={form.flags[flag.key] ? "yes" : "no"}
                   onChange={(v) =>
                     set("flags", { ...form.flags, [flag.key]: v === "yes" })
@@ -719,13 +872,90 @@ export function ExpenseSheet({
             preview={preview}
             loading={previewing}
             cardName={selectedCard?.shortName ?? ""}
+            automated={!selectedCard || rewardIsCalculable}
+            estimated={rewardIsEstimate}
+            officialUrl={selectedCard?.officialUrl || undefined}
           />
+        )}
+
+        {/* ---- issuer-confirmed manual reward ---- */}
+        {usesManualReward && (
+          <div className="space-y-3 rounded-[11px] border border-warn/25 bg-warn-soft p-3">
+            <div
+              role="note"
+              aria-labelledby={`${formId}-manual-reward-title`}
+              aria-describedby={`${formId}-manual-reward-guidance`}
+              className="flex items-start gap-2.5"
+            >
+              <TriangleAlert
+                className="mt-0.5 size-4 shrink-0 text-warn"
+                aria-hidden
+              />
+              <div className="min-w-0">
+                <p
+                  id={`${formId}-manual-reward-title`}
+                  className="text-[0.8125rem] font-semibold text-ink"
+                >
+                  Enter issuer-confirmed rewards only
+                </p>
+                <p
+                  id={`${formId}-manual-reward-guidance`}
+                  className="mt-0.5 text-[0.75rem] leading-relaxed text-ink-2"
+                >
+                  Add the final INR value only after the cashback or reward appears
+                  in your card issuer's app or statement. Leave this blank while it
+                  is pending.
+                </p>
+                {selectedCard.officialUrl && (
+                  <a
+                    href={selectedCard.officialUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1.5 inline-flex min-h-7 items-center text-[0.75rem] font-semibold text-accent hover:underline"
+                  >
+                    Review official card terms
+                    <span className="sr-only"> (opens in a new tab)</span>
+                  </a>
+                )}
+              </div>
+            </div>
+            <Field
+              label="Confirmed reward or cashback (optional)"
+              htmlFor={`${formId}-reward-override`}
+              error={
+                rewardOverrideValid
+                  ? undefined
+                  : "Enter zero or a positive INR amount."
+              }
+            >
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[0.9375rem] text-ink-3">
+                  ₹
+                </span>
+                <Input
+                  id={`${formId}-reward-override`}
+                  name="rewardOverrideAmount"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  value={form.rewardOverrideAmount}
+                  onChange={(event) =>
+                    set("rewardOverrideAmount", event.target.value)
+                  }
+                  placeholder="0.00"
+                  aria-describedby={`${formId}-manual-reward-guidance`}
+                  className="tnum pl-7"
+                />
+              </div>
+            </Field>
+          </div>
         )}
 
         {/* ---- extra discounts ---- */}
         <div>
           <div className="mb-2 flex items-baseline justify-between gap-2">
-            <label className="field-label mb-0">Extra discounts and fees</label>
+            <p className="field-label mb-0">Extra discounts and fees</p>
             {(instantDiscount > 0 || fees > 0) && (
               <span className="text-[0.75rem] text-ink-2 tnum">
                 You actually paid {formatMoney(outOfPocket)}
@@ -743,13 +973,16 @@ export function ExpenseSheet({
         {/* ---- reimbursement ---- */}
         <div className="rounded-[11px] border border-rule-strong">
           <div className="flex items-center justify-between gap-3 px-3 py-2.5">
-            <div>
-              <p className="text-[0.875rem] font-medium">Someone owes me for this</p>
-              <p className="hint mt-0.5">
+            <label htmlFor={`${formId}-reimbursable`} className="block cursor-pointer">
+              <span className="block text-[0.875rem] font-medium">
+                Someone owes me for this
+              </span>
+              <span className="hint mt-0.5 block">
                 Keeps it out of your real spend until it comes back
-              </p>
-            </div>
+              </span>
+            </label>
             <Switch
+              id={`${formId}-reimbursable`}
               checked={form.reimbursable}
               onCheckedChange={(v) => {
                 set("reimbursable", v);
@@ -763,6 +996,7 @@ export function ExpenseSheet({
             <div className="space-y-3 border-t border-rule bg-paper p-3">
               <Segmented
                 fullWidth
+                ariaLabel="Reimbursement amount"
                 value={form.reimbursementMode}
                 onChange={(v) => set("reimbursementMode", v)}
                 options={[
@@ -773,6 +1007,7 @@ export function ExpenseSheet({
               {form.reimbursementMode === "partial" && (
                 <Field
                   label="How much is coming back"
+                  htmlFor={`${formId}-reimbursement-amount`}
                   hint={
                     amountPaise > 0 && reimbursementPaise > 0
                       ? `Leaves ${formatMoney(Math.max(0, amountPaise - reimbursementPaise))} as your own spend`
@@ -780,6 +1015,8 @@ export function ExpenseSheet({
                   }
                 >
                   <Input
+                    id={`${formId}-reimbursement-amount`}
+                    name="reimbursementAmount"
                     inputMode="decimal"
                     value={form.reimbursementAmount}
                     onChange={(e) => set("reimbursementAmount", e.target.value)}
@@ -789,15 +1026,19 @@ export function ExpenseSheet({
                 </Field>
               )}
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="From whom">
+                <Field label="From whom" htmlFor={`${formId}-reimbursement-from`}>
                   <Input
+                    id={`${formId}-reimbursement-from`}
+                    name="reimbursementFrom"
                     value={form.reimbursementFrom}
                     onChange={(e) => set("reimbursementFrom", e.target.value)}
                     placeholder="Work, Rohan, family…"
                   />
                 </Field>
-                <Field label="Expected by">
+                <Field label="Expected by" htmlFor={`${formId}-reimbursement-due`}>
                   <Input
+                    id={`${formId}-reimbursement-due`}
+                    name="reimbursementDueDate"
                     type="date"
                     value={form.reimbursementDueDate}
                     onChange={(e) => set("reimbursementDueDate", e.target.value)}
@@ -817,7 +1058,7 @@ export function ExpenseSheet({
         {/* ---- refunds, once the expense exists ---- */}
         {editing && expenseId && existing && (
           <div>
-            <label className="field-label">Refunds</label>
+            <p className="field-label">Refunds</p>
             <RefundsEditor
               expenseId={expenseId}
               expenseAmountPaise={existing.expense.amountPaise}
@@ -827,8 +1068,10 @@ export function ExpenseSheet({
         )}
 
         {/* ---- notes ---- */}
-        <Field label="Notes">
+        <Field label="Notes" htmlFor={`${formId}-notes`}>
           <Textarea
+            id={`${formId}-notes`}
+            name="notes"
             value={form.notes}
             onChange={(e) => set("notes", e.target.value)}
             placeholder="Anything you want to remember about this one"

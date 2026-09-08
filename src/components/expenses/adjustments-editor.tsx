@@ -143,6 +143,7 @@ function AdjustmentForm({
   onSubmit: (draft: DraftAdjustment) => void;
   onCancel: () => void;
 }) {
+  const formId = React.useId();
   const [label, setLabel] = React.useState(initial?.label ?? "");
   const [kind, setKind] = React.useState<Adjustment["kind"]>(
     initial?.kind ?? "instant_discount",
@@ -161,16 +162,20 @@ function AdjustmentForm({
   return (
     <div className="space-y-2.5">
       <div className="grid gap-2.5 sm:grid-cols-2">
-        <Field label="What is it">
+        <Field label="What is it" htmlFor={`${formId}-label`}>
           <Input
+            id={`${formId}-label`}
+            name="adjustmentLabel"
             autoFocus
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="e.g. HDFC 10% instant discount"
           />
         </Field>
-        <Field label="Amount">
+        <Field label="Amount" htmlFor={`${formId}-amount`}>
           <Input
+            id={`${formId}-amount`}
+            name="adjustmentAmount"
             inputMode="decimal"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
@@ -180,8 +185,10 @@ function AdjustmentForm({
         </Field>
       </div>
       <div className="grid gap-2.5 sm:grid-cols-2">
-        <Field label="Type">
+        <Field label="Type" htmlFor={`${formId}-kind`}>
           <Select
+            id={`${formId}-kind`}
+            name="adjustmentKind"
             value={kind}
             onChange={(e) => {
               const next = e.target.value as Adjustment["kind"];
@@ -196,8 +203,10 @@ function AdjustmentForm({
             ))}
           </Select>
         </Field>
-        <Field label="When it applies">
+        <Field label="When it applies" htmlFor={`${formId}-timing`}>
           <Select
+            id={`${formId}-timing`}
+            name="adjustmentTiming"
             value={immediate ? "immediate" : status}
             onChange={(e) => {
               const v = e.target.value;

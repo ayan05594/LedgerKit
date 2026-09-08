@@ -28,7 +28,7 @@ export const expenseSchema = z
     reimbursementFrom: z.string().max(160).optional(),
     reimbursementDueDate: isoDate.nullable().optional(),
     reimbursementNote: z.string().max(500).optional(),
-    rewardOverridePaise: z.number().int().nullable().optional(),
+    rewardOverridePaise: z.number().int().nonnegative().nullable().optional(),
   })
   .refine((v) => v.instrumentId || v.accountId, {
     message: "Choose the card or account this was paid from",

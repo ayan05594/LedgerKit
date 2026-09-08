@@ -1,4 +1,7 @@
-import { evaluateExpense, newCapLedger, capStatusFor, type EngineInstrument, type EngineRule } from "../src/lib/rewards/engine.ts";
+import { evaluateExpense, newCapLedger, capStatusFor, type EngineInstrument, type EngineRule } from "../src/lib/rewards/engine";
+
+// These are isolated engine-mechanics fixtures. They are never imported by the
+// catalogue, seed, or migrations and must not be treated as current card terms.
 
 let pass = 0, fail = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -27,10 +30,10 @@ const fka: EngineInstrument = {
   excludedCategories: ["fuel", "rent"], defaultFlags: {},
 };
 const fkaRules = [
-  baseRule({ id: "myntra", name: "Myntra", matchMerchants: ["myntra"], rateBps: 750, capUnits: 4000, capPeriod: "quarter", capGroup: "m" }),
-  baseRule({ id: "flipkart", name: "Flipkart", matchMerchants: ["flipkart"], rateBps: 500, capUnits: 4000, capPeriod: "quarter", capGroup: "f" }),
-  baseRule({ id: "partners", name: "Partners", matchMerchants: ["swiggy", "uber"], rateBps: 400 }),
-  baseRule({ id: "base", name: "Base", isBase: true, rateBps: 100 }),
+  baseRule({ id: "myntra", name: "Myntra", matchMerchants: ["myntra"], rateBps: 750, minTxnPaise: 10000, capUnits: 4000, capPeriod: "quarter", capGroup: "m" }),
+  baseRule({ id: "flipkart", name: "Flipkart", matchMerchants: ["flipkart"], rateBps: 500, minTxnPaise: 10000, capUnits: 4000, capPeriod: "quarter", capGroup: "f" }),
+  baseRule({ id: "partners", name: "Partners", matchMerchants: ["swiggy", "uber"], rateBps: 400, minTxnPaise: 10001 }),
+  baseRule({ id: "base", name: "Base", isBase: true, rateBps: 100, minTxnPaise: 10000 }),
 ];
 
 console.log("Flipkart Axis");
@@ -43,6 +46,12 @@ check("₹1,000 Swiggy → ₹40",
   evaluateExpense(fka, fkaRules, exp({ merchantSlug: "swiggy", eligiblePaise: 100000 }), L).valuePaise, 4000);
 check("₹1,000 unknown merchant → ₹10 base",
   evaluateExpense(fka, fkaRules, exp({ eligiblePaise: 100000 }), L).valuePaise, 1000);
+check("₹99.99 is below the general cashback threshold",
+  evaluateExpense(fka, fkaRules, exp({ merchantSlug: "flipkart", eligiblePaise: 9999 }), L).valuePaise, 0);
+check("an exact ₹100 Flipkart transaction earns cashback",
+  evaluateExpense(fka, fkaRules, exp({ merchantSlug: "flipkart", eligiblePaise: 10000 }), L).valuePaise, 500);
+check("an exact ₹100 preferred-partner transaction falls back to 1%",
+  evaluateExpense(fka, fkaRules, exp({ merchantSlug: "swiggy", eligiblePaise: 10000 }), L).valuePaise, 100);
 check("fuel is excluded card-wide",
   evaluateExpense(fka, fkaRules, exp({ categorySlug: "fuel", eligiblePaise: 500000 }), L).valuePaise, 0);
 

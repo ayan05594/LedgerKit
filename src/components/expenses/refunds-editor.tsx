@@ -21,6 +21,7 @@ export function RefundsEditor({
   expenseAmountPaise: number;
   refunds: Refund[];
 }) {
+  const formId = React.useId();
   const [adding, setAdding] = React.useState(false);
   const addRefund = useAddRefund();
   const updateRefund = useUpdateRefund();
@@ -97,9 +98,12 @@ export function RefundsEditor({
           <div className="grid gap-2.5 sm:grid-cols-2">
             <Field
               label="Refund amount"
+              htmlFor={`${formId}-amount`}
               hint={`Up to ${formatMoney(remaining)} left on this expense`}
             >
               <Input
+                id={`${formId}-amount`}
+                name="refundAmount"
                 autoFocus
                 inputMode="decimal"
                 value={amount}
@@ -108,8 +112,10 @@ export function RefundsEditor({
                 className="tnum"
               />
             </Field>
-            <Field label="Refunded on">
+            <Field label="Refunded on" htmlFor={`${formId}-date`}>
               <Input
+                id={`${formId}-date`}
+                name="refundedAt"
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
@@ -117,15 +123,19 @@ export function RefundsEditor({
             </Field>
           </div>
           <div className="grid gap-2.5 sm:grid-cols-2">
-            <Field label="Reason">
+            <Field label="Reason" htmlFor={`${formId}-reason`}>
               <Input
+                id={`${formId}-reason`}
+                name="refundReason"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="Returned, cancelled, price drop…"
               />
             </Field>
-            <Field label="Status">
+            <Field label="Status" htmlFor={`${formId}-status`}>
               <Select
+                id={`${formId}-status`}
+                name="refundStatus"
                 value={status}
                 onChange={(e) => setStatus(e.target.value as "pending" | "received")}
               >

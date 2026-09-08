@@ -1,10 +1,7 @@
-import { createRule } from "@/server/mutations";
-import { handle, type Params } from "@/lib/api";
+import { fail } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request, { params }: Params) {
-  const { id } = await params;
-  const body = await request.json();
-  return handle(async () => ({ id: await createRule(id, body) }));
+export async function POST() {
+  return fail("Verified catalogue reward rules are read-only.", 403);
 }
