@@ -12,7 +12,7 @@ import urllib.request
 
 
 BASE = os.environ.get("LEDGERKIT_URL", "http://localhost:4400").rstrip("/")
-EXPECTED_CATALOG_VERSION = "india-2026-09-08-v5"
+EXPECTED_CATALOG_VERSION = "india-2026-09-09-v6"
 
 
 def get_json(path: str) -> dict:
@@ -38,6 +38,8 @@ check("reference data is ready", health.get("referenceReady") is True)
 check("card catalog is ready", health.get("catalogReady") is True)
 check("card selection schema is ready", health.get("cardSelectionReady") is True)
 check("private manual-card schema is ready", health.get("manualCardReady") is True)
+check("Slice card is restored", health.get("sliceCardReady") is True)
+check("Slice reward estimate is installed", health.get("sliceRewardsReady") is True)
 check("tenant ownership schema is ready", health.get("ownershipReady") is True)
 check(
     "expected catalog version is deployed",

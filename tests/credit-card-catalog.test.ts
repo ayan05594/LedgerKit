@@ -5,6 +5,7 @@ import {
   CREDIT_CARD_CATALOG_META,
   CREDIT_CARD_CATALOG_VERIFIED_AT,
   CREDIT_CARD_ISSUER_SOURCES,
+  SLICE_CREDIT_CARD_VERIFIED_AT,
   CREDIT_CARD_STARTER_CATALOG,
 } from "../src/data/credit-card-catalog";
 import { CREDIT_CARD_CATALOG_EXTRA_A } from "../src/data/credit-card-catalog-extra-a";
@@ -12,6 +13,7 @@ import { CREDIT_CARD_CATALOG_EXTRA_B } from "../src/data/credit-card-catalog-ext
 import {
   CREDIT_CARD_CATALOG_VERSION,
   CREDIT_CARD_INSTRUMENT_SEEDS,
+  PARTIAL_REWARD_CARD_IDS,
   catalogProductIdentity,
 } from "../src/data/credit-card-seed";
 import {
@@ -80,7 +82,12 @@ for (const card of CREDIT_CARD_CATALOG) {
   assert.ok(card.issuer.trim(), `${card.id} must have an issuer`);
   assert.ok(card.rewardSummary.trim(), `${card.id} must have a reward summary`);
   assert.ok(card.highlights.length > 0, `${card.id} must have a highlight`);
-  assert.equal(card.verifiedAt, CREDIT_CARD_CATALOG_VERIFIED_AT);
+  assert.equal(
+    card.verifiedAt,
+    card.id === "slice-upi-credit-card"
+      ? SLICE_CREDIT_CARD_VERIFIED_AT
+      : CREDIT_CARD_CATALOG_VERIFIED_AT,
+  );
 
   const source = new URL(card.sourceUrl);
   assert.equal(source.protocol, "https:", `${card.id} must use an HTTPS source`);
@@ -152,8 +159,9 @@ assert.deepEqual(
     "card-amazon-pay-icici",
     "card-flipkart-axis",
     "card-hdfc-millennia-cc",
+    "card-slice-rupay",
   ].sort(),
-  "the three legacy catalogue IDs must remain stable",
+  "legacy catalogue IDs must remain stable",
 );
 
 const estimatedCatalogCards = CREDIT_CARD_INSTRUMENT_SEEDS
@@ -162,9 +170,28 @@ const estimatedCatalogCards = CREDIT_CARD_INSTRUMENT_SEEDS
   .sort();
 assert.deepEqual(
   estimatedCatalogCards,
-  ["card-hdfc-millennia-cc"],
-  "only the maintained HDFC Millennia calculator may produce estimates",
+  ["card-hdfc-millennia-cc", "card-slice-rupay"],
+  "only maintained partial calculators may produce estimates",
 );
+const sliceCard = CREDIT_CARD_INSTRUMENT_SEEDS.find(
+  ({ id }) => id === "card-slice-rupay",
+);
+assert.ok(sliceCard, "the stable Slice card ID must remain searchable");
+assert.equal(sliceCard.name, "slice UPI Credit Card");
+assert.equal(sliceCard.issuer, "slice Small Finance Bank");
+assert.equal(sliceCard.network, "rupay");
+assert.equal(sliceCard.annualFeeKnown, true);
+assert.equal(sliceCard.annualFeePaise, 0);
+assert.equal(sliceCard.joiningFeeKnown, true);
+assert.equal(sliceCard.joiningFeePaise, 0);
+assert.equal(sliceCard.unitValuePaise, 1);
+assert.equal(
+  sliceCard.rewardKind,
+  "points",
+  "monies are reward points redeemed later, not a wallet balance",
+);
+assert.equal(sliceCard.rewardCoverage, "partial");
+assert.equal(sliceCard.verifiedAt, SLICE_CREDIT_CARD_VERIFIED_AT);
 for (const id of ["card-flipkart-axis", "card-amazon-pay-icici"]) {
   const card = CREDIT_CARD_INSTRUMENT_SEEDS.find((item) => item.id === id);
   assert.ok(card, id + " must remain in the selectable catalogue");
@@ -190,7 +217,7 @@ for (const card of CREDIT_CARD_INSTRUMENT_SEEDS.filter(
 }
 assert.equal(
   CREDIT_CARD_CATALOG_VERSION,
-  "india-2026-09-08-v5",
+  "india-2026-09-09-v6",
   "the estimate coverage policy must invalidate an older catalogue sync marker",
 );
 assert.equal(rewardAutomationEnabled({ rewardCoverage: "manual" }), false);
@@ -203,7 +230,7 @@ assert.equal(
 );
 assert.equal(
   CREDIT_CARD_INSTRUMENT_SEEDS.filter(({ rewardCoverage }) => rewardCoverage === "manual").length,
-  CREDIT_CARD_INSTRUMENT_SEEDS.length - 1,
+  CREDIT_CARD_INSTRUMENT_SEEDS.length - PARTIAL_REWARD_CARD_IDS.size,
   "every catalogue card without a maintained calculator must remain manual",
 );
 assert.deepEqual(manualRewardOutcome(), {
@@ -216,7 +243,12 @@ assert.deepEqual(manualRewardOutcome(), {
 });
 
 for (const card of CREDIT_CARD_INSTRUMENT_SEEDS) {
-  assert.equal(card.verifiedAt, CREDIT_CARD_CATALOG_VERIFIED_AT);
+  assert.equal(
+    card.verifiedAt,
+    card.id === "card-slice-rupay"
+      ? SLICE_CREDIT_CARD_VERIFIED_AT
+      : CREDIT_CARD_CATALOG_VERIFIED_AT,
+  );
   assert.ok(
     ["active", "invite_only", "secured", "applications_paused", "discontinued"].includes(
       card.availability,
@@ -252,7 +284,17 @@ const migration = readFileSync(
   ),
   "utf8",
 );
-const migratedCatalogIds = [...migration.matchAll(/^  \('([^']+)'/gm)]
+const sliceRestoreMigration = readFileSync(
+  new URL(
+    "../supabase/migrations/20260909100000_restore_slice_upi_card.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const migratedCatalogIds = [
+  ...migration.matchAll(/^  \('([^']+)'/gm),
+  ...sliceRestoreMigration.matchAll(/^  \('([^']+)'/gm),
+]
   .map((match) => match[1]!)
   .filter((id) => id.startsWith("card-"));
 assert.deepEqual(
@@ -264,6 +306,57 @@ assert.equal(
   migratedCatalogIds.length,
   CREDIT_CARD_INSTRUMENT_SEEDS.length,
   "the timestamped migration must not insert duplicate catalogue rows",
+);
+assert.match(
+  sliceRestoreMigration,
+  /ON CONFLICT \("id"\) DO UPDATE SET[\s\S]*"is_catalog_card" = true/,
+  "Slice must be restored in place without replacing historical expense links",
+);
+assert.match(
+  sliceRestoreMigration,
+  /FROM "public"\."expenses"[\s\S]*"instrument_id" = 'card-slice-rupay'[\s\S]*ON CONFLICT \("user_id", "instrument_id"\) DO NOTHING/,
+  "only users with their own historical Slice expenses should be backfilled",
+);
+assert.match(
+  sliceRestoreMigration,
+  /'slice-base'[\s\S]*'points_per_block'[\s\S]*100,[\s\n]*1/,
+  "Slice must retain its stable reward rule at 1 money per eligible INR 1",
+);
+assert.match(
+  sliceRestoreMigration,
+  /UPDATE "public"\."expenses"[\s\S]*expense\."reward_units_milli"::bigint \* 100[\s\S]*"unit_value_paise" = 100/,
+  "legacy Slice reward units must be normalized without rewriting cash values",
+);
+assert.match(
+  sliceRestoreMigration,
+  /WHERE expense\."instrument_id" = 'card-slice-rupay'\s+AND expense\."user_id" IS NOT NULL\s+AND btrim\(expense\."user_id"\) <> ''/,
+  "quarantined unowned expenses must not trip the tenant update guard",
+);
+assert.doesNotMatch(
+  sliceRestoreMigration.slice(
+    0,
+    sliceRestoreMigration.indexOf('INSERT INTO "public"."instruments"'),
+  ),
+  /"reward_value_paise"\s*=/,
+  "restoration must preserve historical reward values and manual overrides",
+);
+assert.match(
+  sliceRestoreMigration,
+  /UPDATE "public"\."user_onboarding"[\s\S]*"skipped_cards" = false[\s\S]*"instrument_id" = 'card-slice-rupay'/,
+  "restored historical wallets must not remain marked as having no cards",
+);
+const migrationJournal = JSON.parse(
+  readFileSync(
+    new URL("../supabase/migrations/meta/_journal.json", import.meta.url),
+    "utf8",
+  ),
+) as { entries: { idx: number; tag: string }[] };
+assert.ok(
+  migrationJournal.entries.some(
+    ({ idx, tag }) =>
+      idx === 11 && tag === "20260909100000_restore_slice_upi_card",
+  ),
+  "the Slice restoration must be registered for drizzle-kit migrate",
 );
 assert.match(
   migration,

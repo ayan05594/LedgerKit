@@ -39,6 +39,7 @@ const client = source("src/lib/client-api.ts");
 const route = source("src/app/api/card-selection/route.ts");
 const supabaseServer = source("src/lib/supabase/server.ts");
 const login = source("src/app/api/auth/login/route.ts");
+const picker = source("src/components/cards/card-selection.tsx");
 
 assert.match(
   proxy,
@@ -114,6 +115,11 @@ assert.match(
   client,
   /instruments:[\s\S]*saved\.instruments \?\?[\s\S]*selected\.has\(instrument\.id\)/,
   "the exact saved wallet must replace the cached expense dropdown immediately",
+);
+assert.match(
+  picker,
+  /nextQuery\.trim\(\) && bank === SELECTED_CARDS[\s\S]*setBank\(ALL_BANKS\)/,
+  "typing in an existing wallet must search the full catalogue",
 );
 
 console.log("card wallet: existing sessions must confirm and dropdowns stay selected-only");

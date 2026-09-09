@@ -8,6 +8,7 @@
  */
 
 export const CREDIT_CARD_CATALOG_VERIFIED_AT = "2026-09-08" as const;
+export const SLICE_CREDIT_CARD_VERIFIED_AT = "2026-09-09" as const;
 
 export type CreditCardAvailability =
   | "accepting-applications"
@@ -40,7 +41,7 @@ export type CreditCardCatalogEntry = {
   highlights: readonly string[];
   sourceUrl: string;
   additionalSourceUrls?: readonly string[];
-  verifiedAt: typeof CREDIT_CARD_CATALOG_VERIFIED_AT;
+  verifiedAt: string;
   caveats?: readonly string[];
 };
 
@@ -73,6 +74,7 @@ export const CREDIT_CARD_ISSUER_SOURCES = [
   { issuer: "Standard Chartered India", url: "https://www.sc.bank.in/credit-cards/" },
   { issuer: "BOBCARD", url: "https://www.bobcard.co.in/credit-card-types" },
   { issuer: "Federal Bank", url: "https://www.federal.bank.in/credit-cards" },
+  { issuer: "slice Small Finance Bank", url: "https://slice.bank.in/credit-card" },
 ] as const;
 
 export const CREDIT_CARD_CATALOG = [
@@ -629,6 +631,43 @@ export const CREDIT_CARD_CATALOG = [
   },
 
   {
+    id: "slice-upi-credit-card",
+    aliases: ["card-slice-rupay"],
+    issuer: "slice Small Finance Bank",
+    name: "slice UPI Credit Card",
+    availability: "accepting-applications",
+    networks: ["RuPay"],
+    fees: {
+      joiningInr: 0,
+      annualInr: 0,
+      note: "The current MITC lists no joining or annual membership fee; taxes and future notified changes may apply.",
+    },
+    rewardCurrency: "monies",
+    rewardSummary:
+      "Earn 1 money per eligible INR 1 spent directly or through UPI. Cash redemption starts at 1% and rises to 1.5%, 2% or 3% based on monies balance and, for 3%, the required slice savings-account quarterly balance.",
+    highlights: [
+      "RuPay card payments and UPI QR scans",
+      "Up to 3% cash redemption value under the published tier conditions",
+      "No joining fee, annual membership fee or bank forex markup in the current MITC",
+      "Eligible INR 2,000+ transactions may be sliced over 2 or 3 months; sliced transactions earn no monies",
+      "Weekly slice spark offers are separate, changing promotions",
+    ],
+    sourceUrl: "https://slice.bank.in/credit-card",
+    additionalSourceUrls: [
+      "https://slice.bank.in/cc-mitc",
+      "https://slice.bank.in/cc-terms",
+    ],
+    verifiedAt: SLICE_CREDIT_CARD_VERIFIED_AT,
+    caveats: [
+      "The calculator uses the published 1% base redemption tier; higher tiers depend on the user's current monies balance and the 3% tier also requires the published savings-account balance condition.",
+      "EMI/sliced transactions, wallet loads, fuel, insurance, rent, education, taxes, government services, financial-institution, gaming/gambling, Agriculture MCC 0763, cash-withdrawal and international transactions do not earn monies under the current MITC. Agriculture and the specified gaming/gambling MCCs are not mapped automatically to broad app categories.",
+      "Eligibility is limited to customers onboarded to slice's digital savings account who meet the bank's KYC and credit criteria; billing-cycle and due dates are cardholder-specific.",
+      "Refunds, cancellations, missed minimum payments and programme misuse can reverse or forfeit monies.",
+      "slice spark brand offers rotate and must be recorded manually when applicable.",
+    ],
+  },
+
+  {
     id: "bobcard-cashback",
     issuer: "BOBCARD",
     name: "BOBCARD Cashback",
@@ -731,6 +770,7 @@ const CREDIT_CARD_CATEGORY_BY_ID = {
   "sc-rewards": "rewards",
   "sc-smart": "cashback",
   "sc-easemytrip": "travel",
+  "slice-upi-credit-card": "upi",
   "bobcard-cashback": "cashback",
   "bobcard-select": "rewards",
   "bobcard-snapdeal": "co-branded",
@@ -745,6 +785,7 @@ const CREDIT_CARD_ALIASES_BY_ID: Partial<
   "hdfc-millennia": ["card-hdfc-millennia-cc"],
   "icici-amazon-pay": ["card-amazon-pay-icici"],
   "axis-flipkart": ["card-flipkart-axis"],
+  "slice-upi-credit-card": ["card-slice-rupay"],
 };
 
 const CREDIT_CARD_SEED_AVAILABILITY = {
@@ -768,7 +809,7 @@ export type CreditCardStarterCatalogEntry = {
   catalogCategory: CreditCardCatalogCategory;
   summary: string;
   officialUrl: string;
-  verifiedAt: typeof CREDIT_CARD_CATALOG_VERIFIED_AT;
+  verifiedAt: string;
   availability: CreditCardSeedAvailability;
   rewardCoverage: CreditCardRewardCoverage;
 };

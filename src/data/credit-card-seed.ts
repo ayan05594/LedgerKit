@@ -9,7 +9,7 @@ import {
 } from "./credit-card-catalog-extra-a";
 import { CREDIT_CARD_CATALOG_EXTRA_B } from "./credit-card-catalog-extra-b";
 
-export const CREDIT_CARD_CATALOG_VERSION = "india-2026-09-08-v5";
+export const CREDIT_CARD_CATALOG_VERSION = "india-2026-09-09-v6";
 
 /**
  * This stable legacy card has executable rules, but the engine does not model
@@ -18,6 +18,7 @@ export const CREDIT_CARD_CATALOG_VERSION = "india-2026-09-08-v5";
  */
 export const PARTIAL_REWARD_CARD_IDS = new Set([
   "card-hdfc-millennia-cc",
+  "card-slice-rupay",
 ]);
 
 export interface CreditCardInstrumentSeed {
@@ -71,6 +72,19 @@ const PARTIAL_REWARD_CONFIG: Record<
     unitValuePaise: 100,
     rewardKind: "points",
   },
+  "card-slice-rupay": {
+    rewardUnit: "monies",
+    unitValuePaise: 1,
+    rewardKind: "points",
+    options: {
+      rewardEstimate: "base-redemption-tier",
+      higherRedemptionTiersRequireBalance: true,
+      sparkOffersTrackedManually: true,
+      statementDatesUserSpecific: true,
+      agricultureMccNotAutomated: true,
+      gamingMccNotAutomated: true,
+    },
+  },
 };
 
 const palette: Record<string, readonly [string, string]> = {
@@ -89,6 +103,7 @@ const palette: Record<string, readonly [string, string]> = {
   "Standard Chartered India": ["#007A6B", "#003E36"],
   BOBCARD: ["#F15A22", "#8C2D05"],
   "Federal Bank": ["#6A2C91", "#301044"],
+  "slice Small Finance Bank": ["#6C3EF5", "#2B1071"],
 };
 
 function shortName(value: string) {
@@ -195,9 +210,8 @@ export function projectCreditCardCatalog(): CreditCardInstrumentSeed[] {
       termsUrl: sourceUrls[0] ?? item.sourceUrl,
       verifiedAt: item.verifiedAt,
       availability: projected.availability,
-      // Only the maintained HDFC Millennia calculator is executable, and even
-      // that is explicitly an estimate. Catalogue metadata alone never proves
-      // a complete reward calculator.
+      // Only explicitly maintained partial calculators are executable.
+      // Catalogue metadata alone never proves a complete reward calculator.
       rewardCoverage: PARTIAL_REWARD_CARD_IDS.has(storageId)
         ? "partial"
         : "manual",

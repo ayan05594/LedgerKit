@@ -255,7 +255,16 @@ export function CardSelectionPicker({
             id={searchId}
             name="cardCatalogSearch"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              const nextQuery = event.target.value;
+              setQuery(nextQuery);
+              // Existing wallets open on "Selected" for quick review. As soon
+              // as a user searches, search the full catalogue so a missing card
+              // cannot be hidden behind that default filter.
+              if (nextQuery.trim() && bank === SELECTED_CARDS) {
+                setBank(ALL_BANKS);
+              }
+            }}
             placeholder="Search cards, banks or networks"
             aria-label="Search available credit cards"
             className="bg-surface pl-9 pr-10"

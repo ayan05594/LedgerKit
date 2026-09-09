@@ -146,5 +146,47 @@ check("an expense with no answer falls back to the card default",
 check("the flag does not leak into non-Amazon spend",
   evaluateExpense(api, apiRules, exp({ eligiblePaise: 1000000, flags: { primeMember: false } }), L).ruleName, "Base");
 
+/* ---- slice UPI Credit Card: published base redemption tier ---- */
+console.log("\nslice UPI Credit Card (base-tier estimate)");
+const slice: EngineInstrument = {
+  id: "card-slice-rupay", shortName: "slice UPI", statementDay: 1,
+  rewardUnit: "monies", unitValuePaise: 1, overallCapUnits: null,
+  overallCapPeriod: "none",
+  excludedCategories: [
+    "fuel", "rent", "taxes", "credit-card-bill", "wallet-load",
+    "insurance", "investments", "bank-charges", "education", "courses",
+    "emi",
+  ],
+  defaultFlags: {},
+};
+const sliceRules = [
+  baseRule({
+    id: "slice-base",
+    name: "Eligible card and UPI spends",
+    isBase: true,
+    rateType: "points_per_block",
+    blockSizePaise: 100,
+    pointsPerBlock: 1,
+  }),
+];
+const sliceSpend = evaluateExpense(
+  slice,
+  sliceRules,
+  exp({ eligiblePaise: 100075, channel: "upi" }),
+  newCapLedger(),
+);
+check(
+  "base-tier estimate floors ₹1,000.75 to 1,000 monies",
+  sliceSpend.unitsMilli,
+  1000000,
+);
+check("base redemption tier values those monies at ₹10", sliceSpend.valuePaise, 1000);
+check("fuel earns no monies",
+  evaluateExpense(slice, sliceRules, exp({ categorySlug: "fuel", channel: "upi" }), newCapLedger()).valuePaise, 0);
+check("sliced/EMI transactions earn no monies",
+  evaluateExpense(slice, sliceRules, exp({ categorySlug: "emi" }), newCapLedger()).valuePaise, 0);
+check("education parent category earns no monies",
+  evaluateExpense(slice, sliceRules, exp({ categorySlug: "education" }), newCapLedger()).valuePaise, 0);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
