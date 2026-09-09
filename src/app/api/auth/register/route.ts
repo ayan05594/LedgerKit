@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { fail, ok } from "@/lib/api";
+import { withCardOnboardingMetadata } from "@/lib/card-onboarding";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
     email: parsed.data.email,
     password: parsed.data.password,
     email_confirm: true,
-    app_metadata: { card_onboarding_completed: false },
+    app_metadata: withCardOnboardingMetadata({}, false),
   });
   if (error || !data.user) {
     const duplicate = error?.message.toLowerCase().includes("already");

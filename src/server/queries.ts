@@ -68,18 +68,28 @@ export async function getReference(
 ): Promise<Reference> {
   const userId = authenticatedUserId ?? await requireUserId();
   const admin = createSupabaseAdminClient();
-  const selectionResult = await admin
-    .from("user_card_selections")
-    .select("instrument_id")
-    .eq("user_id", userId);
-  if (selectionResult.error) throw selectionResult.error;
-  const accessibleInstrumentIds = [
+  const [selectionResult, onboardingResult] = await Promise.all([
+    admin
+      .from("user_card_selections")
+      .select("instrument_id")
+      .eq("user_id", userId),
+    admin
+      .from("user_onboarding")
+      .select("cards_completed_at")
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]);
+  const selectionError = selectionResult.error ?? onboardingResult.error;
+  if (selectionError) throw selectionError;
+  const walletConfirmed = Boolean(onboardingResult.data?.cards_completed_at);
+  const selectedInstrumentIds = [
     ...new Set(
       (selectionResult.data ?? [])
         .map((row) => row.instrument_id)
         .filter((id): id is string => typeof id === "string" && id.length > 0),
     ),
   ];
+  const accessibleInstrumentIds = walletConfirmed ? selectedInstrumentIds : [];
   const results = await Promise.all([
     admin
       .from("categories")

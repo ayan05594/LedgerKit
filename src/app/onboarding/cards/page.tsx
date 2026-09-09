@@ -29,14 +29,14 @@ export default function CardOnboardingPage() {
   const saveSelection = useSaveCardSelection();
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [noCards, setNoCards] = React.useState(false);
-  const hydrated = React.useRef(false);
+  const [hydrated, setHydrated] = React.useState(false);
 
   React.useEffect(() => {
-    if (!data || hydrated.current) return;
+    if (!data || hydrated) return;
     setSelectedIds(data.selectedIds);
     setNoCards(data.completed && data.selectedIds.length === 0);
-    hydrated.current = true;
-  }, [data]);
+    setHydrated(true);
+  }, [data, hydrated]);
 
   const canContinue = selectedIds.length > 0 || noCards;
 
@@ -118,7 +118,7 @@ export default function CardOnboardingPage() {
                     }
                   />
                 </div>
-              ) : isLoading || !data ? (
+              ) : isLoading || !data || !hydrated ? (
                 <div
                   className="mt-6 flex min-h-[420px] flex-col items-center justify-center rounded-[14px] border border-rule bg-paper"
                   aria-live="polite"
@@ -147,7 +147,7 @@ export default function CardOnboardingPage() {
             </div>
           </div>
 
-          {!error && data && (
+          {!error && data && hydrated && (
             <footer className="sticky bottom-0 z-20 border-t border-rule bg-surface/95 px-4 py-3 backdrop-blur sm:px-8 sm:py-4 lg:px-10">
               <div className="mx-auto flex max-w-[820px] flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0 text-center sm:text-left" aria-live="polite">

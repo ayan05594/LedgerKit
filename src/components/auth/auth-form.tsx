@@ -18,7 +18,7 @@ import {
 
 type Mode = "login" | "register";
 
-export function AuthForm({ mode }: { mode: Mode }) {
+export function AuthForm({ mode, notice }: { mode: Mode; notice?: string }) {
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
@@ -95,6 +95,16 @@ export function AuthForm({ mode }: { mode: Mode }) {
                   : "Sign in to continue to your personal expense and rewards dashboard."}
               </p>
             </div>
+
+            {notice && (
+              <div
+                role="status"
+                className="mb-4 flex items-start gap-2.5 rounded-[10px] border border-gain/15 bg-gain-soft px-3.5 py-3 text-sm leading-5 text-gain"
+              >
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
+                {notice}
+              </div>
+            )}
 
             <form className="space-y-4" onSubmit={submit}>
               <Field label="Email address" htmlFor="auth-email">

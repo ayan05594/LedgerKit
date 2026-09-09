@@ -131,6 +131,7 @@ export interface CardSelectionData {
   catalog: CardCatalogItem[];
   selectedIds: string[];
   completed: boolean;
+  skippedCards: boolean;
 }
 
 export type RewardPreview = RewardOutcome & {
@@ -379,15 +380,49 @@ export function useRecordStandaloneReimbursementReceipt() {
 }
 
 export function useSaveCardSelection() {
-  return useWrite(
-    (json: { instrumentIds: string[]; noCards: boolean }) =>
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (json: { instrumentIds: string[]; noCards: boolean }) =>
       request<{
         selectedIds: string[];
+        instruments?: Instrument[];
         completed: true;
+        reauthRequired: boolean;
         redirectTo?: string;
       }>("/api/card-selection", { method: "PUT", json }),
-    "Card choices saved",
-  );
+    onSuccess: (saved, variables) => {
+      const selected = new Set(saved.selectedIds);
+      // Remove deselected cards synchronously. If the background refetch is
+      // interrupted, an expense form must never keep offering the old wallet.
+      qc.setQueryData<ReferenceData>(keys.reference, (current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          instruments:
+            saved.instruments ??
+            current.instruments.filter((instrument) =>
+              selected.has(instrument.id),
+            ),
+          rules: current.rules.filter((rule) =>
+            selected.has(rule.instrumentId),
+          ),
+        };
+      });
+      qc.setQueryData<CardSelectionData>(keys.cardSelection, (current) =>
+        current
+          ? {
+              ...current,
+              selectedIds: saved.selectedIds,
+              completed: true,
+              skippedCards: variables.noCards,
+            }
+          : current,
+      );
+      invalidateAll(qc);
+      toast.success("Card choices saved");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
 }
 
 export function useCreateManualCard() {

@@ -43,7 +43,9 @@ export function CardSelectionPicker({
   className?: string;
 }) {
   const [query, setQuery] = React.useState("");
-  const [bank, setBank] = React.useState(ALL_BANKS);
+  const [bank, setBank] = React.useState(() =>
+    selectedIds.length > 0 ? SELECTED_CARDS : ALL_BANKS,
+  );
   const [expandedBanks, setExpandedBanks] = React.useState<Set<string>>(
     () => new Set(),
   );

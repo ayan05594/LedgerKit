@@ -15,7 +15,7 @@
     "db:catalog:sql": "node --import tsx scripts/generate-card-catalog-sql.mjs --write-migration=supabase/migrations/20260908120000_card_catalog_onboarding.sql",
     "db:catalog:print": "node --import tsx scripts/generate-card-catalog-sql.mjs",
     "typecheck": "tsc --noEmit --allowImportingTsExtensions",
-    "test": "tsx tests/engine.test.ts && tsx tests/validation.test.ts && tsx tests/reimbursements.test.ts && tsx tests/credit-card-catalog.test.ts && tsx tests/tenant-isolation.test.ts && tsx tests/data-api-mutations.test.ts && tsx tests/manual-rewards-ui.test.ts && tsx tests/manual-card-fallback.test.ts"
+    "test": "tsx tests/engine.test.ts && tsx tests/validation.test.ts && tsx tests/reimbursements.test.ts && tsx tests/credit-card-catalog.test.ts && tsx tests/tenant-isolation.test.ts && tsx tests/data-api-mutations.test.ts && tsx tests/manual-rewards-ui.test.ts && tsx tests/manual-card-fallback.test.ts && tsx tests/card-wallet.test.ts"
   },
   "keywords": [],
   "author": "",

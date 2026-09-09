@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { fail, ok } from "@/lib/api";
+import { hasCurrentCardOnboarding } from "@/lib/card-onboarding";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   getCardOnboardingStatus,
@@ -19,8 +20,7 @@ export async function POST(request: Request) {
   const { data, error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error) return fail("Email or password is incorrect.", 401);
 
-  const claimCompleted =
-    data.user.app_metadata?.card_onboarding_completed === true;
+  const claimCompleted = hasCurrentCardOnboarding(data.user.app_metadata);
   let completed: boolean;
   try {
     // The relational row is durable truth. Missing rows mean onboarding has
@@ -42,14 +42,14 @@ export async function POST(request: Request) {
     });
   }
 
-  if (claimCompleted !== completed) {
+  if (claimCompleted && !completed) {
     try {
-      await setCardOnboardingMetadata(data.user.id, completed);
+      await setCardOnboardingMetadata(data.user.id, false);
       const { data: refreshed, error: refreshError } =
         await supabase.auth.refreshSession();
       if (
         refreshError ||
-        refreshed.user?.app_metadata?.card_onboarding_completed !== completed
+        hasCurrentCardOnboarding(refreshed.user?.app_metadata)
       ) {
         throw refreshError ?? new Error("The refreshed session has stale claims.");
       }
@@ -61,20 +61,17 @@ export async function POST(request: Request) {
             ? refreshError.message
             : "Unknown session refresh error",
       });
-      if (claimCompleted && !completed) {
-        // Never trust a stale true claim when durable state says setup is
-        // incomplete. Clearing the session fails closed.
-        await supabase.auth.signOut();
-        return fail("Your session could not be refreshed. Please sign in again.", 503);
-      }
-      // A stale false claim can safely remain inside onboarding, where saving
-      // the already-selected cards will mint a fresh token.
-      return ok({
-        redirectTo: "/onboarding/cards",
-        onboardingStatusDeferred: true,
-      });
+      // Never trust a stale true claim when durable state says setup is
+      // incomplete. Clearing the session fails closed.
+      await supabase.auth.signOut();
+      return fail("Your session could not be refreshed. Please sign in again.", 503);
     }
   }
 
-  return ok({ redirectTo: completed ? "/" : "/onboarding/cards" });
+  // A durable timestamp without the current signed claim can be a migrated or
+  // pre-release wallet. Never silently upgrade it: the user must explicitly
+  // confirm the selected cards once.
+  return ok({
+    redirectTo: completed && claimCompleted ? "/" : "/onboarding/cards",
+  });
 }

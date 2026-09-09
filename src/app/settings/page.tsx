@@ -345,7 +345,13 @@ export default function SettingsPage() {
                     noCards: draftNoCards,
                   },
                   {
-                    onSuccess: () => {
+                    onSuccess: (result) => {
+                      if (result.reauthRequired) {
+                        window.location.assign(
+                          result.redirectTo ?? "/login?walletSaved=1",
+                        );
+                        return;
+                      }
                       saveCardSelection.reset();
                       setCardsOpen(false);
                     },
@@ -358,7 +364,7 @@ export default function SettingsPage() {
           </>
         }
       >
-        {cardSelection && (
+        {cardsOpen && cardSelection && (
           <CardSelectionPicker
             catalog={cardSelection.catalog}
             selectedIds={draftCardIds}

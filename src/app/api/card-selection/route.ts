@@ -1,13 +1,37 @@
 import { z } from "zod";
 import { ApiError, handle, handleRead } from "@/lib/api";
 import { requireUserId } from "@/lib/auth";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { hasCurrentCardOnboarding } from "@/lib/card-onboarding";
+import {
+  clearSupabaseAuthCookies,
+  createSupabaseServerClient,
+} from "@/lib/supabase/server";
 import {
   getCardSelection,
+  listInstrumentsForSelection,
   saveCardSelection,
+  setCardOnboardingMetadata,
 } from "@/server/card-selection";
 
 export const dynamic = "force-dynamic";
+const OPTIONAL_WALLET_HYDRATION_TIMEOUT_MS = 1_000;
+
+async function settleWithin<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T | undefined> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<undefined>((resolve) => {
+        timeoutId = setTimeout(() => resolve(undefined), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
 export const runtime = "nodejs";
 
 const saveSchema = z
@@ -47,23 +71,67 @@ export async function PUT(request: Request) {
     }
 
     const userId = await requireUserId();
+    const supabase = await createSupabaseServerClient();
+    const { data: currentClaims } = await supabase.auth.getClaims();
+    const sessionWasCurrent = hasCurrentCardOnboarding(
+      currentClaims?.claims?.app_metadata,
+    );
     const saved = await saveCardSelection(userId, parsed.data);
+    const instrumentsPromise = settleWithin(
+      listInstrumentsForSelection(userId, saved.selectedIds).catch(
+        (instrumentError) => {
+          console.error("Saved wallet instruments could not be returned", {
+            name:
+              instrumentError instanceof Error
+                ? instrumentError.name
+                : "UnknownError",
+            message:
+              instrumentError instanceof Error
+                ? instrumentError.message
+                : "Unknown instrument read error",
+          });
+          return undefined;
+        },
+      ),
+      OPTIONAL_WALLET_HYDRATION_TIMEOUT_MS,
+    );
 
     // app_metadata is signed into the access token used by middleware. Issue a
     // fresh token now so the first navigation after onboarding is not bounced
     // back to this page with stale claims.
-    const supabase = await createSupabaseServerClient();
-    const { data: refreshed, error } = await supabase.auth.refreshSession();
-    if (
-      error ||
-      refreshed.user?.app_metadata?.card_onboarding_completed !== true
-    ) {
-      throw new ApiError(
-        "Your cards were saved, but the session could not be refreshed. Please try once more.",
-        503,
-      );
+    // An already-current Settings session does not need refresh-token rotation
+    // just to change its wallet.
+    let reauthRequired = false;
+    if (!sessionWasCurrent) {
+      try {
+        await setCardOnboardingMetadata(userId, true);
+        const { data: refreshed, error } = await supabase.auth.refreshSession();
+        if (error || !hasCurrentCardOnboarding(refreshed.user?.app_metadata)) {
+          throw error ?? new Error("The refreshed session has stale claims.");
+        }
+      } catch (refreshError) {
+        // The RPC above is already committed. A refresh token damaged by the
+        // previous proxy cannot be repaired by repeatedly saving, so finish
+        // successfully and obtain a clean session through password sign-in.
+        console.error("Wallet saved but the session requires a fresh sign-in", {
+          name:
+            refreshError instanceof Error ? refreshError.name : "UnknownError",
+          message:
+            refreshError instanceof Error
+              ? refreshError.message
+              : "Unknown session refresh error",
+        });
+        await clearSupabaseAuthCookies();
+        reauthRequired = true;
+      }
     }
 
-    return { ...saved, redirectTo: "/" };
+    const instruments = await instrumentsPromise;
+    return {
+      ...saved,
+      instruments,
+      reauthRequired,
+      redirectTo: reauthRequired ? "/login?walletSaved=1" : "/",
+    };
   });
 }

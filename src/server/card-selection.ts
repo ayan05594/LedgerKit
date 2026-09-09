@@ -6,6 +6,7 @@ import {
   type CardCatalogItem,
 } from "@/lib/card-catalog";
 import { ApiError } from "@/lib/api";
+import { withCardOnboardingMetadata } from "@/lib/card-onboarding";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fromSupabaseRows, toSupabaseRow } from "@/lib/supabase/rows";
 
@@ -58,22 +59,37 @@ export async function getSelectedCardIds(userId: string): Promise<string[]> {
   );
 }
 
-/** Selected cards for dashboard/card-list reads. Historical hydration queries
- * deliberately load the global catalogue separately. */
-export async function listSelectedInstruments(
+export async function listInstrumentsForSelection(
   userId: string,
+  instrumentIds: string[],
 ): Promise<Instrument[]> {
-  const selectedIds = await getSelectedCardIds(userId);
-  if (!selectedIds.length) return [];
+  const uniqueIds = [...new Set(instrumentIds)];
+  if (!uniqueIds.length) return [];
   const result = await createSupabaseAdminClient()
     .from("instruments")
     .select("*")
-    .in("id", selectedIds)
+    .in("id", uniqueIds)
     .or(`is_catalog_card.eq.true,owner_user_id.eq.${userId}`)
     .order("sort_order")
     .order("name");
   if (result.error) throw result.error;
   return fromSupabaseRows<Instrument>(result.data);
+}
+
+/** Selected cards for dashboard/card-list reads. Historical hydration queries
+ * deliberately load the global catalogue separately. */
+export async function listSelectedInstruments(
+  userId: string,
+): Promise<Instrument[]> {
+  const [selectedIds, onboarding] = await Promise.all([
+    getSelectedCardIds(userId),
+    getCardOnboardingStatus(userId),
+  ]);
+  // Rows copied from historical expenses during the migration are suggestions,
+  // not a confirmed wallet. Never expose them in normal card pickers until the
+  // user has explicitly saved the onboarding step.
+  if (!onboarding.completed || !selectedIds.length) return [];
+  return listInstrumentsForSelection(userId, selectedIds);
 }
 
 export async function getCardOnboardingStatus(userId: string): Promise<{
@@ -318,22 +334,6 @@ export async function saveCardSelection(
     throw saveResult.error;
   }
 
-  // Do not replace unrelated roles/claims that another integration may keep in
-  // app_metadata. Supabase's admin update accepts the complete object.
-  const userResult = await admin.auth.admin.getUserById(userId);
-  if (userResult.error || !userResult.data.user) {
-    throw userResult.error ?? new ApiError("Could not update your sign-in.", 503);
-  }
-  const metadataResult = await admin.auth.admin.updateUserById(userId, {
-    app_metadata: {
-      ...userResult.data.user.app_metadata,
-      card_onboarding_completed: true,
-    },
-  });
-  if (metadataResult.error) {
-    throw metadataResult.error;
-  }
-
   const selectedIds = Array.isArray(saveResult.data)
     ? saveResult.data.filter((value): value is string => typeof value === "string")
     : instrumentIds;
@@ -350,10 +350,10 @@ export async function setCardOnboardingMetadata(
     throw userResult.error ?? new ApiError("Could not update your sign-in.", 503);
   }
   const result = await admin.auth.admin.updateUserById(userId, {
-    app_metadata: {
-      ...userResult.data.user.app_metadata,
-      card_onboarding_completed: completed,
-    },
+    app_metadata: withCardOnboardingMetadata(
+      userResult.data.user.app_metadata,
+      completed,
+    ),
   });
   if (result.error) throw result.error;
 }

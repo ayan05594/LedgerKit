@@ -4,6 +4,7 @@ import {
   supabasePublishableKey,
   supabaseUrl,
 } from "@/lib/supabase/config";
+import { hasCurrentCardOnboarding } from "@/lib/card-onboarding";
 
 const AUTH_PAGES = new Set(["/login", "/register"]);
 const CARD_ONBOARDING_PAGE = "/onboarding/cards";
@@ -17,12 +18,7 @@ const PUBLIC_API = new Set([
 function hasCompletedCardOnboarding(claims: unknown) {
   if (!claims || typeof claims !== "object") return false;
   const appMetadata = (claims as { app_metadata?: unknown }).app_metadata;
-  return Boolean(
-    appMetadata &&
-      typeof appMetadata === "object" &&
-      (appMetadata as { card_onboarding_completed?: unknown })
-        .card_onboarding_completed === true,
-  );
+  return hasCurrentCardOnboarding(appMetadata);
 }
 
 export async function proxy(request: NextRequest) {
@@ -34,14 +30,22 @@ export async function proxy(request: NextRequest) {
   const nextResponse = () =>
     NextResponse.next({ request: { headers: requestHeaders } });
   let response = nextResponse();
+  const authResponseHeaders: Record<string, string> = {};
   const supabase = createServerClient(supabaseUrl(), supabasePublishableKey(), {
     cookies: {
       getAll: () => request.cookies.getAll(),
-      setAll(values) {
+      setAll(values, headers) {
         for (const { name, value } of values) request.cookies.set(name, value);
+        // NextResponse receives the cloned request headers, so keep its cookie
+        // header aligned when Supabase rotates an access or refresh token.
+        requestHeaders.set("cookie", request.cookies.toString());
+        Object.assign(authResponseHeaders, headers);
         response = nextResponse();
         for (const { name, value, options } of values) {
           response.cookies.set(name, value, options);
+        }
+        for (const [name, value] of Object.entries(authResponseHeaders)) {
+          response.headers.set(name, value);
         }
       },
     },
@@ -52,23 +56,22 @@ export async function proxy(request: NextRequest) {
   const isAuthenticated = Boolean(userId);
   const cardOnboardingComplete = hasCompletedCardOnboarding(data?.claims);
   const path = request.nextUrl.pathname;
-  const preserveAuthCookies = <T extends NextResponse>(next: T) => {
+  const preserveAuthState = <T extends NextResponse>(next: T) => {
     for (const cookie of response.cookies.getAll()) next.cookies.set(cookie);
+    for (const [name, value] of Object.entries(authResponseHeaders)) {
+      next.headers.set(name, value);
+    }
     return next;
   };
 
   if (userId) {
     requestHeaders.set("x-ledgerkit-user-id", userId);
-    const authenticatedResponse = nextResponse();
-    for (const cookie of response.cookies.getAll()) {
-      authenticatedResponse.cookies.set(cookie);
-    }
-    response = authenticatedResponse;
+    response = preserveAuthState(nextResponse());
   }
 
   if (!isAuthenticated && !AUTH_PAGES.has(path) && !PUBLIC_API.has(path)) {
     if (path.startsWith("/api/")) {
-      return preserveAuthCookies(
+      return preserveAuthState(
         NextResponse.json(
           { ok: false, error: "Please sign in to continue." },
           { status: 401 },
@@ -77,13 +80,13 @@ export async function proxy(request: NextRequest) {
     }
     const login = request.nextUrl.clone();
     login.pathname = "/login";
-    return preserveAuthCookies(NextResponse.redirect(login));
+    return preserveAuthState(NextResponse.redirect(login));
   }
 
   if (isAuthenticated && AUTH_PAGES.has(path)) {
     const destination = request.nextUrl.clone();
     destination.pathname = cardOnboardingComplete ? "/" : CARD_ONBOARDING_PAGE;
-    return preserveAuthCookies(NextResponse.redirect(destination));
+    return preserveAuthState(NextResponse.redirect(destination));
   }
 
   if (isAuthenticated && !cardOnboardingComplete) {
@@ -96,7 +99,7 @@ export async function proxy(request: NextRequest) {
 
     if (!mayFinishOnboarding) {
       if (path.startsWith("/api/")) {
-        return preserveAuthCookies(
+        return preserveAuthState(
           NextResponse.json(
             {
               ok: false,
@@ -109,7 +112,7 @@ export async function proxy(request: NextRequest) {
       }
       const onboarding = request.nextUrl.clone();
       onboarding.pathname = CARD_ONBOARDING_PAGE;
-      return preserveAuthCookies(NextResponse.redirect(onboarding));
+      return preserveAuthState(NextResponse.redirect(onboarding));
     }
   }
 
@@ -120,7 +123,7 @@ export async function proxy(request: NextRequest) {
   ) {
     const home = request.nextUrl.clone();
     home.pathname = "/";
-    return preserveAuthCookies(NextResponse.redirect(home));
+    return preserveAuthState(NextResponse.redirect(home));
   }
 
   return response;
