@@ -18,6 +18,7 @@ import {
 } from "recharts";
 import { useReducedMotion } from "motion/react";
 import type { RewardRule } from "@/db/schema";
+import type { CreditCardResearch } from "@/data/credit-card-research";
 import {
   useCreateRule,
   useInstrument,
@@ -96,6 +97,12 @@ export default function CardDetailPage() {
   );
   const perks = safeJson<string[]>(instrument.perks, []);
   const excluded = safeJson<string[]>(instrument.excludedCategories, []);
+  const instrumentOptions = safeJson<Record<string, unknown>>(
+    instrument.options,
+    {},
+  );
+  const research = readCardResearch(instrumentOptions.catalogResearch);
+  const rewardSourceUrl = firstUrl(research?.rewardSourceUrl);
   const sourceNote = readableSourceNote(instrument.sourceNote);
   const rewardIsCalculable = rewardAutomationEnabled(instrument);
   const rewardIsEstimate = instrument.rewardCoverage === "partial";
@@ -205,6 +212,65 @@ export default function CardDetailPage() {
             )}
           </Panel>
 
+          {research && (
+            <Panel
+              title="Reward programme"
+              subtitle="Research supplied for this exact card variant. Blank fields remain unknown rather than being treated as zero."
+            >
+              <div className="space-y-4">
+                <ResearchText
+                  label="Base reward"
+                  value={research.baseReward}
+                  prominent
+                />
+                <ResearchText
+                  label="Accelerated rewards"
+                  value={research.acceleratedRewards}
+                  prominent
+                />
+                <dl className="grid gap-3 sm:grid-cols-2">
+                  <ResearchFact
+                    label="Reward-point value"
+                    value={research.rewardPointValue}
+                  />
+                  <ResearchFact label="Caps" value={research.caps} />
+                  <ResearchFact
+                    label="Minimum transaction"
+                    value={research.minimumTransaction}
+                  />
+                  <ResearchFact
+                    label="Forex markup"
+                    value={research.forexMarkup}
+                  />
+                </dl>
+                {(research.excludedCategories ||
+                  research.excludedMerchants) && (
+                  <div className="grid gap-3 border-t border-rule pt-4 sm:grid-cols-2">
+                    <ResearchText
+                      label="Excluded categories or MCCs"
+                      value={research.excludedCategories}
+                    />
+                    <ResearchText
+                      label="Excluded merchants"
+                      value={research.excludedMerchants}
+                    />
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-rule pt-3 text-[0.75rem] text-ink-3">
+                  <span>
+                    Effective: {research.effectiveDate ?? "not recorded"}
+                  </span>
+                  {research.rewardSourceType && (
+                    <span>Source: {research.rewardSourceType}</span>
+                  )}
+                  {research.rewardResearchDate && (
+                    <span>Checked: {research.rewardResearchDate}</span>
+                  )}
+                </div>
+              </div>
+            </Panel>
+          )}
+
           <Panel title="Rewards through the year" bodyClassName="p-4">
             {rewardIsCalculable ? (
             <div className="h-[168px] w-full">
@@ -304,9 +370,10 @@ export default function CardDetailPage() {
                 <div>
                   <dt className="text-ink-3">Forex markup</dt>
                   <dd className="mt-0.5 font-semibold text-ink">
-                    {instrument.rewardCoverage === "exact"
+                    {research?.forexMarkup ??
+                    (instrument.rewardCoverage === "exact"
                       ? percentFromBps(instrument.forexMarkupBps)
-                      : "Check issuer terms"}
+                      : "Check issuer terms")}
                   </dd>
                 </div>
                 <div>
@@ -327,9 +394,9 @@ export default function CardDetailPage() {
               )}
               <div className="mt-4 border-t border-rule pt-3">
                 <p className="text-[0.75rem] leading-relaxed text-ink-3">
-                  Verified {instrument.verifiedAt || "date not recorded"} from the
-                  issuer&rsquo;s published information. Issuers can change terms
-                  without notice.
+                  Research checked {instrument.verifiedAt || "date not recorded"}.
+                  Source type and effective-date notes appear with the reward
+                  programme. Issuers can change terms without notice.
                 </p>
                 {instrument.officialUrl && (
                   <a
@@ -343,6 +410,19 @@ export default function CardDetailPage() {
                     <span className="sr-only"> (opens in a new tab)</span>
                   </a>
                 )}
+                {rewardSourceUrl &&
+                  rewardSourceUrl !== instrument.officialUrl && (
+                    <a
+                      className="mt-2 flex items-center gap-1.5 text-[0.8125rem] font-semibold text-accent hover:text-ink"
+                      href={rewardSourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open reward terms source
+                      <ExternalLink className="size-3.5" />
+                      <span className="sr-only"> (opens in a new tab)</span>
+                    </a>
+                  )}
               </div>
             </Panel>
           ) : (
@@ -415,6 +495,53 @@ export default function CardDetailPage() {
 }
 
 /* ------------------------------------------------------------------ rows */
+
+function ResearchText({
+  label,
+  value,
+  prominent = false,
+}: {
+  label: string;
+  value: string | null;
+  prominent?: boolean;
+}) {
+  if (!value) return null;
+  return (
+    <div>
+      <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink-3">
+        {label}
+      </p>
+      <p
+        className={
+          prominent
+            ? "mt-1 text-[0.875rem] font-medium leading-relaxed text-ink"
+            : "mt-1 text-[0.8125rem] leading-relaxed text-ink-2"
+        }
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function ResearchFact({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null;
+}) {
+  return (
+    <div className="rounded-[10px] bg-sunken p-3">
+      <dt className="text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink-3">
+        {label}
+      </dt>
+      <dd className="mt-1 text-[0.8125rem] leading-relaxed text-ink-2">
+        {value ?? "Not verified"}
+      </dd>
+    </div>
+  );
+}
 
 function RuleRow({
   rule,
@@ -738,6 +865,29 @@ function readableSourceNote(raw: string) {
     return parsed.filter((value): value is string => typeof value === "string").join(" ");
   }
   return typeof parsed === "string" ? parsed : raw;
+}
+
+function readCardResearch(value: unknown): CreditCardResearch | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<CreditCardResearch>;
+  if (
+    typeof candidate.issuer !== "string" ||
+    typeof candidate.name !== "string" ||
+    (candidate.status !== "Selectable" &&
+      candidate.status !== "Discontinued")
+  ) {
+    return null;
+  }
+  return candidate as CreditCardResearch;
+}
+
+function firstUrl(value: string | null | undefined) {
+  return (
+    value
+      ?.split(/\r?\n/)
+      .map((url) => url.trim())
+      .find(Boolean) ?? null
+  );
 }
 
 function knownFee(known: boolean, amountPaise: number) {

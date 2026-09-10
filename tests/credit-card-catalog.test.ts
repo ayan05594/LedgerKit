@@ -17,6 +17,14 @@ import {
   catalogProductIdentity,
 } from "../src/data/credit-card-seed";
 import {
+  CREDIT_CARD_RESEARCH,
+  CREDIT_CARD_RESEARCH_SOURCE,
+  CREDIT_CARD_RESEARCH_VERSION,
+  getCreditCardResearch,
+  researchFeePaise,
+  researchForexMarkupBps,
+} from "../src/data/credit-card-research";
+import {
   MANUAL_REWARD_EXPLANATION,
   manualRewardOutcome,
   rewardAutomationEnabled,
@@ -170,9 +178,28 @@ const estimatedCatalogCards = CREDIT_CARD_INSTRUMENT_SEEDS
   .sort();
 assert.deepEqual(
   estimatedCatalogCards,
-  ["card-hdfc-millennia-cc", "card-slice-rupay"],
+  ["card-flipkart-axis", "card-hdfc-millennia-cc", "card-slice-rupay"],
   "only maintained partial calculators may produce estimates",
 );
+const officialHostAliases = new Map<string, Set<string>>(
+  CREDIT_CARD_ISSUER_SOURCES.map(({ issuer, url }) => [
+    issuer,
+    new Set([new URL(url).hostname]),
+  ]),
+);
+for (const [issuer, hosts] of Object.entries({
+  "ICICI Bank": ["www.icicibank.com"],
+  "Axis Bank": ["www.axisbank.com"],
+  "Kotak Mahindra Bank": ["www.kotak.bank.in"],
+  "Federal Bank": ["www.federalbank.co.in"],
+  "RBL Bank": ["webassets.rblbank.com"],
+  "Standard Chartered India": ["www.sc.com"],
+  "YES BANK": ["www.yesbank.in"],
+})) {
+  const allowed = officialHostAliases.get(issuer);
+  assert.ok(allowed, `missing issuer host allowlist for ${issuer}`);
+  hosts.forEach((host) => allowed.add(host));
+}
 const sliceCard = CREDIT_CARD_INSTRUMENT_SEEDS.find(
   ({ id }) => id === "card-slice-rupay",
 );
@@ -192,21 +219,25 @@ assert.equal(
 );
 assert.equal(sliceCard.rewardCoverage, "partial");
 assert.equal(sliceCard.verifiedAt, SLICE_CREDIT_CARD_VERIFIED_AT);
-for (const id of ["card-flipkart-axis", "card-amazon-pay-icici"]) {
-  const card = CREDIT_CARD_INSTRUMENT_SEEDS.find((item) => item.id === id);
-  assert.ok(card, id + " must remain in the selectable catalogue");
-  assert.equal(card.rewardCoverage, "manual");
-  assert.equal(
-    card.unitValuePaise,
-    0,
-    id + " must not retain calculator conversion metadata",
-  );
-  assert.equal(
-    (JSON.parse(card.options) as { flags?: unknown }).flags,
-    undefined,
-    id + " must not ask calculator-specific questions while tracking rewards manually",
-  );
-}
+const flipkartAxis = CREDIT_CARD_INSTRUMENT_SEEDS.find(
+  ({ id }) => id === "card-flipkart-axis",
+);
+assert.ok(flipkartAxis, "Flipkart Axis must remain in the selectable catalogue");
+assert.equal(flipkartAxis.rewardCoverage, "partial");
+assert.equal(flipkartAxis.rewardUnit, "INR");
+assert.equal(flipkartAxis.unitValuePaise, 100);
+assert.equal(
+  (JSON.parse(flipkartAxis.options) as { floorRewardToWholeUnit?: boolean })
+    .floorRewardToWholeUnit,
+  true,
+  "Axis cashback must be rounded down to a whole rupee per transaction",
+);
+const amazonPay = CREDIT_CARD_INSTRUMENT_SEEDS.find(
+  ({ id }) => id === "card-amazon-pay-icici",
+);
+assert.ok(amazonPay, "Amazon Pay ICICI must remain in the selectable catalogue");
+assert.equal(amazonPay.rewardCoverage, "manual");
+assert.equal(amazonPay.unitValuePaise, 0);
 for (const card of CREDIT_CARD_INSTRUMENT_SEEDS.filter(
   ({ rewardCoverage }) => rewardCoverage === "partial",
 )) {
@@ -217,9 +248,31 @@ for (const card of CREDIT_CARD_INSTRUMENT_SEEDS.filter(
 }
 assert.equal(
   CREDIT_CARD_CATALOG_VERSION,
-  "india-2026-09-09-v6",
-  "the estimate coverage policy must invalidate an older catalogue sync marker",
+  "india-2026-09-10-v8",
+  "the workbook research import must invalidate an older catalogue sync marker",
 );
+assert.equal(CREDIT_CARD_RESEARCH_VERSION, "2026-09-09-second-pass");
+assert.equal(CREDIT_CARD_RESEARCH_SOURCE.cardCount, 295);
+assert.match(CREDIT_CARD_RESEARCH_SOURCE.sha256, /^[a-f0-9]{64}$/);
+assert.equal(CREDIT_CARD_RESEARCH.length, CREDIT_CARD_INSTRUMENT_SEEDS.length);
+assert.equal(
+  CREDIT_CARD_RESEARCH.filter(({ status }) => status === "Selectable").length,
+  249,
+);
+assert.equal(
+  new Set(CREDIT_CARD_RESEARCH.map(({ issuer, name }) => `${issuer}\u0000${name}`))
+    .size,
+  CREDIT_CARD_RESEARCH.length,
+  "workbook research identities must be unique",
+);
+assert.equal(researchFeePaise("₹1,000 + applicable taxes"), 100_000);
+assert.equal(researchFeePaise("Lifetime-free positioning"), 0);
+assert.equal(
+  researchFeePaise("Published renewal fee applies; check current terms."),
+  null,
+);
+assert.equal(researchForexMarkupBps("1.99% plus applicable taxes"), 199);
+assert.equal(researchForexMarkupBps("As per primary card"), null);
 assert.equal(rewardAutomationEnabled({ rewardCoverage: "manual" }), false);
 assert.equal(rewardAutomationEnabled({ rewardCoverage: "partial" }), true);
 assert.equal(rewardAutomationEnabled({ rewardCoverage: "exact" }), true);
@@ -243,11 +296,25 @@ assert.deepEqual(manualRewardOutcome(), {
 });
 
 for (const card of CREDIT_CARD_INSTRUMENT_SEEDS) {
+  const research = getCreditCardResearch(card.issuer, card.name);
+  assert.ok(research, `${card.id} must have an exact workbook research row`);
+  const options = JSON.parse(card.options) as {
+    researchVersion?: string;
+    catalogResearch?: { issuer?: string; name?: string };
+  };
+  assert.equal(options.researchVersion, CREDIT_CARD_RESEARCH_VERSION);
+  assert.equal(options.catalogResearch?.issuer, card.issuer);
+  assert.equal(options.catalogResearch?.name, card.name);
+  assert.ok(
+    card.catalogSummary.includes(research.baseReward ?? research.acceleratedRewards ?? ""),
+    `${card.id} must publish its researched reward summary`,
+  );
   assert.equal(
     card.verifiedAt,
-    card.id === "card-slice-rupay"
-      ? SLICE_CREDIT_CARD_VERIFIED_AT
-      : CREDIT_CARD_CATALOG_VERIFIED_AT,
+    research.rewardResearchDate ??
+      (card.id === "card-slice-rupay"
+        ? SLICE_CREDIT_CARD_VERIFIED_AT
+        : CREDIT_CARD_CATALOG_VERIFIED_AT),
   );
   assert.ok(
     ["active", "invite_only", "secured", "applications_paused", "discontinued"].includes(
@@ -257,8 +324,10 @@ for (const card of CREDIT_CARD_INSTRUMENT_SEEDS) {
   );
   assert.equal(new URL(card.officialUrl).protocol, "https:");
   assert.equal(
-    new URL(card.officialUrl).hostname,
-    issuerHostByName.get(card.issuer),
+    officialHostAliases.get(card.issuer)?.has(
+      new URL(card.officialUrl).hostname,
+    ),
+    true,
     `${card.id} must retain an issuer-owned source host`,
   );
   if (!card.annualFeeKnown) {
@@ -290,6 +359,31 @@ const sliceRestoreMigration = readFileSync(
     import.meta.url,
   ),
   "utf8",
+);
+const researchMigration = readFileSync(
+  new URL(
+    "../supabase/migrations/20260910003000_import_card_reward_research.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const researchedMigrationIds = [...researchMigration.matchAll(/^  \('([^']+)'/gm)]
+  .map((match) => match[1]!)
+  .filter((id) => id.startsWith("card-"));
+assert.equal(researchedMigrationIds.length, CREDIT_CARD_INSTRUMENT_SEEDS.length);
+assert.deepEqual(
+  new Set(researchedMigrationIds),
+  new Set(CREDIT_CARD_INSTRUMENT_SEEDS.map(({ id }) => id)),
+  "the workbook migration must publish every exact catalogue card once",
+);
+assert.match(
+  researchMigration,
+  /"fee_note", "perks", "source_note", "options"/,
+  "the workbook migration must persist structured research metadata",
+);
+assert.ok(
+  researchMigration.includes(CREDIT_CARD_RESEARCH_VERSION),
+  "the workbook migration must carry its research version",
 );
 const migratedCatalogIds = [
   ...migration.matchAll(/^  \('([^']+)'/gm),
@@ -358,6 +452,13 @@ assert.ok(
   ),
   "the Slice restoration must be registered for drizzle-kit migrate",
 );
+assert.ok(
+  migrationJournal.entries.some(
+    ({ idx, tag }) =>
+      idx === 12 && tag === "20260910003000_import_card_reward_research",
+  ),
+  "the workbook import must be registered for drizzle-kit migrate",
+);
 assert.match(
   migration,
   /ADD COLUMN "is_catalog_card" boolean DEFAULT false NOT NULL/,
@@ -403,10 +504,11 @@ assert.match(
   /const publishRules =\s*!isCatalogCard \|\| PARTIAL_REWARD_CARD_IDS\.has\(card\.id\);[\s\S]*?\(publishRules \? card\.rules : \[\]\)/,
   "idempotent seeding must publish rules only for maintained catalogue calculators",
 );
+assert.match(seedSource, /id: "fka-cleartrip"[\s\S]*?rateBps: 500/);
 assert.doesNotMatch(
   seedSource,
-  /id: "(?:fka|api)-/,
-  "manual Flipkart Axis and Amazon Pay ICICI calculators must not remain in the seed",
+  /id: "api-/,
+  "Amazon Pay ICICI must not regain an incomplete calculator",
 );
 
 const partialCalculatorMigration = readFileSync(
@@ -450,6 +552,31 @@ assert.doesNotMatch(
   partialCalculatorMigration,
   /'(?:fka|api)-/,
   "manual catalogue cards must not retain production reward rules",
+);
+
+const flipkartCalculatorMigration = readFileSync(
+  new URL(
+    "../supabase/migrations/20260910113000_enable_flipkart_axis_estimates.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+for (const ruleId of [
+  "fka-myntra",
+  "fka-flipkart",
+  "fka-cleartrip",
+  "fka-partners",
+  "fka-base",
+]) {
+  assert.ok(
+    flipkartCalculatorMigration.includes(`'${ruleId}'`),
+    `${ruleId} must be installed for migration-only deploys`,
+  );
+}
+assert.match(
+  flipkartCalculatorMigration,
+  /reward_coverage = 'partial'/,
+  "Flipkart Axis calculations must remain labelled as estimates",
 );
 
 console.log(

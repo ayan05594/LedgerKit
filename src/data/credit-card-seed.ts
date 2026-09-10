@@ -8,8 +8,17 @@ import {
   type CreditCardCatalogExtension,
 } from "./credit-card-catalog-extra-a";
 import { CREDIT_CARD_CATALOG_EXTRA_B } from "./credit-card-catalog-extra-b";
+import {
+  firstResearchUrl,
+  getCreditCardResearch,
+  researchFeeNote,
+  researchFeePaise,
+  researchPerks,
+  researchSourceNotes,
+  researchSummary,
+} from "./credit-card-research";
 
-export const CREDIT_CARD_CATALOG_VERSION = "india-2026-09-09-v6";
+export const CREDIT_CARD_CATALOG_VERSION = "india-2026-09-10-v8";
 
 /**
  * This stable legacy card has executable rules, but the engine does not model
@@ -17,6 +26,7 @@ export const CREDIT_CARD_CATALOG_VERSION = "india-2026-09-09-v6";
  * never as an exact statement outcome.
  */
 export const PARTIAL_REWARD_CARD_IDS = new Set([
+  "card-flipkart-axis",
   "card-hdfc-millennia-cc",
   "card-slice-rupay",
 ]);
@@ -67,6 +77,17 @@ const PARTIAL_REWARD_CONFIG: Record<
     options?: Record<string, unknown>;
   }
 > = {
+  "card-flipkart-axis": {
+    rewardUnit: "INR",
+    unitValuePaise: 100,
+    rewardKind: "statement_cashback",
+    options: {
+      floorRewardToWholeUnit: true,
+      statementQuarterUsesDefaultStatementDay: true,
+      merchantIdClassificationMayDiffer: true,
+      excludedTollsNeedManualReview: true,
+    },
+  },
   "card-hdfc-millennia-cc": {
     rewardUnit: "CashPoints",
     unitValuePaise: 100,
@@ -178,6 +199,15 @@ export function projectCreditCardCatalog(): CreditCardInstrumentSeed[] {
       projected.aliases[0] ?? `card-catalog-${projected.id}`;
     const sourceUrls = item.additionalSourceUrls ?? [];
     const partialConfig = PARTIAL_REWARD_CONFIG[storageId];
+    const research = getCreditCardResearch(item.issuer, item.name);
+    const researchedAnnualFee = researchFeePaise(research?.annualFee ?? null);
+    const researchedJoiningFee = researchFeePaise(research?.joiningFee ?? null);
+    const officialUrl =
+      firstResearchUrl(research?.officialSourceUrl ?? null) ?? item.sourceUrl;
+    const termsUrl =
+      firstResearchUrl(research?.rewardSourceUrl ?? null) ??
+      sourceUrls[0] ??
+      officialUrl;
 
     return {
       id: storageId,
@@ -191,24 +221,38 @@ export function projectCreditCardCatalog(): CreditCardInstrumentSeed[] {
       rewardUnit: partialConfig?.rewardUnit ?? item.rewardCurrency,
       unitValuePaise: partialConfig?.unitValuePaise ?? 0,
       rewardKind: partialConfig?.rewardKind ?? rewardKind(item.rewardCurrency),
-      annualFeePaise: paise(item.fees.annualInr),
-      annualFeeKnown: item.fees.annualInr != null,
-      joiningFeePaise: paise(item.fees.joiningInr),
-      joiningFeeKnown: item.fees.joiningInr != null,
-      feeNote: item.fees.note ?? "",
-      perks: JSON.stringify(item.highlights),
-      sourceNote: JSON.stringify(item.caveats ?? []),
+      annualFeePaise:
+        researchedAnnualFee ?? paise(item.fees.annualInr),
+      annualFeeKnown:
+        researchedAnnualFee != null || item.fees.annualInr != null,
+      joiningFeePaise:
+        researchedJoiningFee ?? paise(item.fees.joiningInr),
+      joiningFeeKnown:
+        researchedJoiningFee != null || item.fees.joiningInr != null,
+      feeNote:
+        (research && researchFeeNote(research)) || item.fees.note || "",
+      perks: JSON.stringify([
+        ...item.highlights,
+        ...(research ? researchPerks(research) : []),
+      ]),
+      sourceNote: JSON.stringify([
+        ...(item.caveats ?? []),
+        ...(research ? researchSourceNotes(research) : []),
+      ]),
       options: JSON.stringify({
         catalogId: item.id,
         aliases: projected.aliases,
         sourceUrls,
+        researchVersion: research ? "2026-09-09-second-pass" : null,
+        catalogResearch: research,
         ...partialConfig?.options,
       }),
       catalogCategory: projected.catalogCategory,
-      catalogSummary: item.rewardSummary,
-      officialUrl: item.sourceUrl,
-      termsUrl: sourceUrls[0] ?? item.sourceUrl,
-      verifiedAt: item.verifiedAt,
+      catalogSummary:
+        (research && researchSummary(research)) || item.rewardSummary,
+      officialUrl,
+      termsUrl,
+      verifiedAt: research?.rewardResearchDate ?? item.verifiedAt,
       availability: projected.availability,
       // Only explicitly maintained partial calculators are executable.
       // Catalogue metadata alone never proves a complete reward calculator.
@@ -246,6 +290,13 @@ function projectExtensionCatalog(): CreditCardInstrumentSeed[] {
     })
     .map((item, index) => {
       const colors = palette[item.issuer] ?? ["#334155", "#0F172A"];
+      const research = getCreditCardResearch(item.issuer, item.name);
+      const researchedAnnualFee = researchFeePaise(research?.annualFee ?? null);
+      const researchedJoiningFee = researchFeePaise(research?.joiningFee ?? null);
+      const officialUrl =
+        firstResearchUrl(research?.officialSourceUrl ?? null) ?? item.officialUrl;
+      const termsUrl =
+        firstResearchUrl(research?.rewardSourceUrl ?? null) ?? officialUrl;
       return {
         id: `card-catalog-${item.id}`,
         name: item.name,
@@ -258,21 +309,30 @@ function projectExtensionCatalog(): CreditCardInstrumentSeed[] {
         rewardUnit: "Rewards (manual)",
         unitValuePaise: 0,
         rewardKind: "points",
-        annualFeePaise: 0,
-        annualFeeKnown: false,
-        joiningFeePaise: 0,
-        joiningFeeKnown: false,
-        feeNote: "Check the linked issuer page for the current fee on your exact variant.",
-        perks: "[]",
-        sourceNote:
+        annualFeePaise: researchedAnnualFee ?? 0,
+        annualFeeKnown: researchedAnnualFee != null,
+        joiningFeePaise: researchedJoiningFee ?? 0,
+        joiningFeeKnown: researchedJoiningFee != null,
+        feeNote:
+          (research && researchFeeNote(research)) ||
+          "Check the linked issuer page for the current fee on your exact variant.",
+        perks: JSON.stringify(research ? researchPerks(research) : []),
+        sourceNote: JSON.stringify([
           "Card name and availability verified from the issuer catalogue. Detailed reward automation is intentionally disabled.",
-        options: JSON.stringify({ catalogExtension: true }),
+          ...(research ? researchSourceNotes(research) : []),
+        ]),
+        options: JSON.stringify({
+          catalogExtension: true,
+          researchVersion: research ? "2026-09-09-second-pass" : null,
+          catalogResearch: research,
+        }),
         catalogCategory: item.category,
         catalogSummary:
+          (research && researchSummary(research)) ||
           "Official catalogue card. Open the issuer source for current benefits, caps, exclusions and fees.",
-        officialUrl: item.officialUrl,
-        termsUrl: item.officialUrl,
-        verifiedAt: "2026-09-08",
+        officialUrl,
+        termsUrl,
+        verifiedAt: research?.rewardResearchDate ?? "2026-09-08",
         availability: item.availability,
         rewardCoverage: "manual",
         isCatalogCard: true,

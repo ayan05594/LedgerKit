@@ -31,6 +31,7 @@ function json<T>(raw: string, fallback: T): T {
 }
 
 export function toEngineInstrument(row: Instrument): EngineInstrument {
+  const options = json<Record<string, unknown>>(row.options, {});
   return {
     id: row.id,
     shortName: row.shortName,
@@ -41,6 +42,7 @@ export function toEngineInstrument(row: Instrument): EngineInstrument {
     overallCapPeriod: row.overallCapPeriod as CapPeriod,
     excludedCategories: json<string[]>(row.excludedCategories, []),
     defaultFlags: defaultFlagsFor(row),
+    floorRewardToWholeUnit: options.floorRewardToWholeUnit === true,
   };
 }
 

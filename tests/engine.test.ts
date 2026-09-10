@@ -28,10 +28,12 @@ const fka: EngineInstrument = {
   id: "fka", shortName: "Flipkart Axis", statementDay: 18, rewardUnit: "INR",
   unitValuePaise: 100, overallCapUnits: null, overallCapPeriod: "none",
   excludedCategories: ["fuel", "rent"], defaultFlags: {},
+  floorRewardToWholeUnit: true,
 };
 const fkaRules = [
   baseRule({ id: "myntra", name: "Myntra", matchMerchants: ["myntra"], rateBps: 750, minTxnPaise: 10000, capUnits: 4000, capPeriod: "quarter", capGroup: "m" }),
   baseRule({ id: "flipkart", name: "Flipkart", matchMerchants: ["flipkart"], rateBps: 500, minTxnPaise: 10000, capUnits: 4000, capPeriod: "quarter", capGroup: "f" }),
+  baseRule({ id: "cleartrip", name: "Cleartrip", matchMerchants: ["cleartrip"], rateBps: 500, minTxnPaise: 10000, capUnits: 4000, capPeriod: "quarter", capGroup: "c" }),
   baseRule({ id: "partners", name: "Partners", matchMerchants: ["swiggy", "uber"], rateBps: 400, minTxnPaise: 10001 }),
   baseRule({ id: "base", name: "Base", isBase: true, rateBps: 100, minTxnPaise: 10000 }),
 ];
@@ -52,6 +54,8 @@ check("an exact ₹100 Flipkart transaction earns cashback",
   evaluateExpense(fka, fkaRules, exp({ merchantSlug: "flipkart", eligiblePaise: 10000 }), L).valuePaise, 500);
 check("an exact ₹100 preferred-partner transaction falls back to 1%",
   evaluateExpense(fka, fkaRules, exp({ merchantSlug: "swiggy", eligiblePaise: 10000 }), L).valuePaise, 100);
+check("₹630 Cleartrip cashback rounds down from ₹31.50 to ₹31",
+  evaluateExpense(fka, fkaRules, exp({ merchantSlug: "cleartrip", eligiblePaise: 63000 }), L).valuePaise, 3100);
 check("fuel is excluded card-wide",
   evaluateExpense(fka, fkaRules, exp({ categorySlug: "fuel", eligiblePaise: 500000 }), L).valuePaise, 0);
 

@@ -85,6 +85,20 @@
       "when": 1788948000000,
       "tag": "20260909100000_restore_slice_upi_card",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789000200000,
+      "tag": "20260910003000_import_card_reward_research",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1789039800000,
+      "tag": "20260910113000_enable_flipkart_axis_estimates",
+      "breakpoints": true
     }
   ]
 }

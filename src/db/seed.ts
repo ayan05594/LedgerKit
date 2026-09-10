@@ -297,7 +297,38 @@ export const CARDS: CardSeed[] = [
     ],
     sourceNote:
       "Rates reflect the June 2025 revision: Myntra rose to 7.5% and per-merchant quarterly caps of ₹4,000 were introduced on Flipkart, Myntra and Cleartrip.",
-    rules: [],
+    rules: [
+      {
+        id: "fka-myntra", name: "Myntra",
+        matchMerchants: ["myntra"], rateBps: 750, minTxnPaise: R(100),
+        capUnits: 4000, capPeriod: "quarter", capGroup: "fka-myntra",
+        notes: "Partial estimate: Axis applies the ₹4,000 cap per customer statement quarter and classifies eligibility by merchant ID.",
+      },
+      {
+        id: "fka-flipkart", name: "Flipkart",
+        matchMerchants: ["flipkart"], rateBps: 500, minTxnPaise: R(100),
+        capUnits: 4000, capPeriod: "quarter", capGroup: "fka-flipkart",
+        notes: "Partial estimate: separate ₹4,000 statement-quarter cap; Flipkart Health and excluded purchases do not qualify.",
+      },
+      {
+        id: "fka-cleartrip", name: "Cleartrip",
+        matchMerchants: ["cleartrip"], rateBps: 500, minTxnPaise: R(100),
+        capUnits: 4000, capPeriod: "quarter", capGroup: "fka-cleartrip",
+        notes: "Partial estimate: separate ₹4,000 statement-quarter cap and merchant-ID eligibility apply.",
+      },
+      {
+        id: "fka-partners", name: "Preferred partners",
+        matchMerchants: ["swiggy", "uber", "pvr", "cultfit"],
+        rateBps: 400, minTxnPaise: R(100) + 1,
+        capUnits: null, capPeriod: "none",
+        notes: "Current preferred-partner estimate. Swiggy acceleration applies only to eligible food-delivery transactions; Axis may change partners without notice.",
+      },
+      {
+        id: "fka-base", name: "Other eligible spending", isBase: true,
+        rateBps: 100, minTxnPaise: R(100), capUnits: null, capPeriod: "none",
+        notes: "1% base cashback estimate. Axis rounds cashback down to the nearest whole rupee per transaction.",
+      },
+    ],
   },
 
   {

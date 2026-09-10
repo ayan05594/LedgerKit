@@ -12,7 +12,7 @@ import urllib.request
 
 
 BASE = os.environ.get("LEDGERKIT_URL", "http://localhost:4400").rstrip("/")
-EXPECTED_CATALOG_VERSION = "india-2026-09-09-v6"
+EXPECTED_CATALOG_VERSION = "india-2026-09-10-v7"
 
 
 def get_json(path: str) -> dict:

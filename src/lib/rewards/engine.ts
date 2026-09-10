@@ -14,6 +14,8 @@ export interface EngineInstrument {
   excludedCategories: string[];
   /** Fallback answers for card conditions when an expense doesn't carry one. */
   defaultFlags: Record<string, boolean>;
+  /** Some cashback programmes discard fractional reward units per transaction. */
+  floorRewardToWholeUnit?: boolean;
 }
 
 export interface EngineRule {
@@ -197,7 +199,12 @@ function grossUnitsMilli(
 ): number {
   if (rule.rateType === "percent") {
     const valuePaise = (eligiblePaise * rule.rateBps) / 10000;
-    return Math.round((valuePaise * MILLI) / Math.max(instrument.unitValuePaise, 1));
+    const unitsMilli = Math.round(
+      (valuePaise * MILLI) / Math.max(instrument.unitValuePaise, 1),
+    );
+    return instrument.floorRewardToWholeUnit
+      ? Math.floor(unitsMilli / MILLI) * MILLI
+      : unitsMilli;
   }
   const blocks = Math.floor(eligiblePaise / Math.max(rule.blockSizePaise, 1));
   return blocks * rule.pointsPerBlock * MILLI;
