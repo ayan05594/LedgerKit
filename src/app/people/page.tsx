@@ -4,6 +4,7 @@ import * as React from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  Pencil,
   Plus,
   Trash2,
   UserPlus,
@@ -11,12 +12,14 @@ import {
 } from "lucide-react";
 import type { PersonBalance } from "@/server/queries";
 import {
+  type TransferRow as TransferListRow,
   useCreatePerson,
   useCreateTransfer,
   useDeleteTransfer,
   usePeople,
   useReference,
   useTransfers,
+  useUpdateTransfer,
 } from "@/lib/client-api";
 import { formatMoney, toPaise } from "@/lib/money";
 import { formatDate, todayISO } from "@/lib/rewards/periods";
@@ -36,6 +39,10 @@ import {
 } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
 import { DataLoadError } from "@/components/ui/data-load-error";
+import {
+  inferBalanceTreatment,
+  type BalanceTreatment,
+} from "@/lib/transfers/balance";
 
 export default function PeoplePage() {
   const {
@@ -55,6 +62,8 @@ export default function PeoplePage() {
   const [transferOpen, setTransferOpen] = React.useState(false);
   const [personOpen, setPersonOpen] = React.useState(false);
   const [prefillPerson, setPrefillPerson] = React.useState<string | null>(null);
+  const [editingTransfer, setEditingTransfer] =
+    React.useState<TransferListRow | null>(null);
 
   const owedToYou = (balances ?? [])
     .filter((b) => b.netPaise > 0)
@@ -85,6 +94,7 @@ export default function PeoplePage() {
             variant="primary"
             onClick={() => {
               setPrefillPerson(null);
+              setEditingTransfer(null);
               setTransferOpen(true);
             }}
           >
@@ -143,6 +153,7 @@ export default function PeoplePage() {
               balance={b}
               onSettle={() => {
                 setPrefillPerson(b.person.id);
+                setEditingTransfer(null);
                 setTransferOpen(true);
               }}
             />
@@ -171,7 +182,15 @@ export default function PeoplePage() {
         ) : (
           <ul className="divide-y divide-rule">
             {transfers.map((t) => (
-              <TransferRow key={t.id} transfer={t} />
+              <TransferLogRow
+                key={t.id}
+                transfer={t}
+                onEdit={() => {
+                  setPrefillPerson(null);
+                  setEditingTransfer(t);
+                  setTransferOpen(true);
+                }}
+              />
             ))}
           </ul>
         )}
@@ -179,8 +198,12 @@ export default function PeoplePage() {
 
       <TransferDialog
         open={transferOpen}
-        onOpenChange={setTransferOpen}
+        onOpenChange={(open) => {
+          setTransferOpen(open);
+          if (!open) setEditingTransfer(null);
+        }}
         prefillPersonId={prefillPerson}
+        transfer={editingTransfer}
       />
       <PersonDialog open={personOpen} onOpenChange={setPersonOpen} />
     </div>
@@ -254,23 +277,25 @@ function PersonCard({
   );
 }
 
-function TransferRow({
+const balanceTreatmentLabels: Record<BalanceTreatment, string> = {
+  creates_receivable: "they owe you",
+  settles_receivable: "repayment to you",
+  creates_payable: "you owe them",
+  settles_payable: "you repaid",
+  none: "no debt",
+};
+
+function TransferLogRow({
   transfer,
+  onEdit,
 }: {
-  transfer: {
-    id: string;
-    direction: "sent" | "received";
-    amountPaise: number;
-    occurredAt: string;
-    purpose: string;
-    countsAsSpend: boolean;
-    note: string;
-    personName: string;
-    personColor: string;
-  };
+  transfer: TransferListRow;
+  onEdit: () => void;
 }) {
   const deleteTransfer = useDeleteTransfer();
   const sent = transfer.direction === "sent";
+  const treatment =
+    transfer.balanceTreatment ?? inferBalanceTreatment(transfer);
 
   return (
     <li className="row-hover flex items-center gap-2.5 px-3 py-2.5 sm:gap-3 sm:px-4">
@@ -301,6 +326,8 @@ function TransferRow({
               <span className="hidden truncate sm:inline">{transfer.note}</span>
             </>
           )}
+          <span aria-hidden>·</span>
+          <span>{balanceTreatmentLabels[treatment]}</span>
         </p>
         {transfer.countsAsSpend && (
           <Chip tone="neutral" className="mt-1 sm:hidden">
@@ -326,6 +353,14 @@ function TransferRow({
       <Button
         variant="ghost"
         size="icon"
+        aria-label="Edit transfer"
+        onClick={onEdit}
+      >
+        <Pencil className="size-3.5 text-ink-3" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
         aria-label="Remove transfer"
         onClick={() => deleteTransfer.mutate(transfer.id)}
       >
@@ -339,13 +374,16 @@ function TransferDialog({
   open,
   onOpenChange,
   prefillPersonId,
+  transfer,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   prefillPersonId: string | null;
+  transfer: TransferListRow | null;
 }) {
   const { data: reference } = useReference(open);
   const createTransfer = useCreateTransfer();
+  const updateTransfer = useUpdateTransfer();
 
   const [direction, setDirection] = React.useState<"sent" | "received">("sent");
   const [personId, setPersonId] = React.useState("");
@@ -355,20 +393,42 @@ function TransferDialog({
   const [appSlug, setAppSlug] = React.useState("");
   const [purpose, setPurpose] = React.useState("other");
   const [countsAsSpend, setCountsAsSpend] = React.useState(false);
+  const [balanceTreatment, setBalanceTreatment] =
+    React.useState<BalanceTreatment>("none");
   const [note, setNote] = React.useState("");
 
   React.useEffect(() => {
     if (!open) return;
-    setDirection("sent");
+    if (transfer) {
+      setDirection(transfer.direction);
+      setPersonId(transfer.personId ?? "");
+      setAmount(String(transfer.amountPaise / 100));
+      setOccurredAt(transfer.occurredAt);
+      setAccountId(transfer.accountId ?? "");
+      setAppSlug(transfer.paymentAppSlug ?? "");
+      setPurpose(transfer.purpose);
+      setCountsAsSpend(transfer.countsAsSpend);
+      setBalanceTreatment(
+        transfer.balanceTreatment ?? inferBalanceTreatment(transfer),
+      );
+      setNote(transfer.note);
+      return;
+    }
+    const initialDirection = "sent";
+    const initialPurpose = "other";
+    setDirection(initialDirection);
     setPersonId(prefillPersonId ?? reference?.people[0]?.id ?? "");
     setAmount("");
     setOccurredAt(todayISO());
     setAccountId(reference?.accounts[0]?.id ?? "");
     setAppSlug("gpay");
-    setPurpose("other");
+    setPurpose(initialPurpose);
     setCountsAsSpend(false);
+    setBalanceTreatment(
+      suggestedBalanceTreatment(initialDirection, initialPurpose),
+    );
     setNote("");
-  }, [open, prefillPersonId, reference]);
+  }, [open, prefillPersonId, reference, transfer]);
 
   // Gifts and splits are real spending; loans and repayments are not.
   React.useEffect(() => {
@@ -382,7 +442,7 @@ function TransferDialog({
       open={open}
       onOpenChange={onOpenChange}
       width="520px"
-      title="Record a transfer"
+      title={transfer ? "Edit transfer" : "Record a transfer"}
       footer={
         <>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
@@ -390,26 +450,34 @@ function TransferDialog({
           </Button>
           <Button
             variant="primary"
-            loading={createTransfer.isPending}
+            loading={createTransfer.isPending || updateTransfer.isPending}
             disabled={toPaise(amount) <= 0 || !personId}
             onClick={() => {
-              createTransfer.mutate(
-                {
-                  direction,
-                  personId,
-                  amountPaise: toPaise(amount),
-                  occurredAt,
-                  accountId: accountId || null,
-                  paymentAppSlug: appSlug || null,
-                  purpose,
-                  countsAsSpend,
-                  note: note.trim(),
-                },
-                { onSuccess: () => onOpenChange(false) },
-              );
+              const values = {
+                direction,
+                personId,
+                amountPaise: toPaise(amount),
+                occurredAt,
+                accountId: accountId || null,
+                paymentAppSlug: appSlug || null,
+                purpose,
+                countsAsSpend,
+                balanceTreatment,
+                note: note.trim(),
+              };
+              if (transfer) {
+                updateTransfer.mutate(
+                  { id: transfer.id, ...values },
+                  { onSuccess: () => onOpenChange(false) },
+                );
+              } else {
+                createTransfer.mutate(values, {
+                  onSuccess: () => onOpenChange(false),
+                });
+              }
             }}
           >
-            Record
+            {transfer ? "Save changes" : "Record"}
           </Button>
         </>
       }
@@ -418,7 +486,12 @@ function TransferDialog({
         <Segmented
           fullWidth
           value={direction}
-          onChange={setDirection}
+          onChange={(nextDirection) => {
+            setDirection(nextDirection);
+            setBalanceTreatment(
+              suggestedBalanceTreatment(nextDirection, purpose),
+            );
+          }}
           options={[
             { value: "sent", label: "I sent money" },
             { value: "received", label: "I received money" },
@@ -456,7 +529,16 @@ function TransferDialog({
             />
           </Field>
           <Field label="Reason">
-            <Select value={purpose} onChange={(e) => setPurpose(e.target.value)}>
+            <Select
+              value={purpose}
+              onChange={(e) => {
+                const nextPurpose = e.target.value;
+                setPurpose(nextPurpose);
+                setBalanceTreatment(
+                  suggestedBalanceTreatment(direction, nextPurpose),
+                );
+              }}
+            >
               <option value="other">Other</option>
               <option value="loan">Loan</option>
               <option value="repayment">Paying back</option>
@@ -467,6 +549,35 @@ function TransferDialog({
             </Select>
           </Field>
         </div>
+
+        <Field
+          label="Balance impact"
+          hint={
+            direction === "received"
+              ? "Choose whether this was repayment, borrowed money, or unrelated income."
+              : "Choose whether they owe you, you repaid them, or this is not a debt."
+          }
+        >
+          <Select
+            value={balanceTreatment}
+            onChange={(event) =>
+              setBalanceTreatment(event.target.value as BalanceTreatment)
+            }
+          >
+            <option value="none">No balance change</option>
+            {direction === "received" ? (
+              <>
+                <option value="settles_receivable">They paid me back</option>
+                <option value="creates_payable">I owe them for this</option>
+              </>
+            ) : (
+              <>
+                <option value="creates_receivable">They owe me for this</option>
+                <option value="settles_payable">I paid them back</option>
+              </>
+            )}
+          </Select>
+        </Field>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="From account">
@@ -511,6 +622,18 @@ function TransferDialog({
       </div>
     </Dialog>
   );
+}
+
+function suggestedBalanceTreatment(
+  direction: "sent" | "received",
+  purpose: string,
+): BalanceTreatment {
+  return inferBalanceTreatment({
+    direction,
+    purpose,
+    countsAsSpend:
+      purpose === "gift" || purpose === "split" || purpose === "shared",
+  });
 }
 
 function PersonDialog({

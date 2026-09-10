@@ -20,6 +20,7 @@ import { capsForInstruments } from "@/lib/rewards/recompute";
 import { rewardAutomationEnabled } from "@/lib/rewards/coverage";
 import type { CapStatus } from "@/lib/rewards/engine";
 import { requireUserId } from "@/lib/auth";
+import { derivePersonDebtBalance } from "@/lib/transfers/balance";
 import {
   deriveStandaloneReimbursementState,
   type StandaloneReimbursementStatus,
@@ -690,21 +691,14 @@ export async function getPeopleBalances(
     const receivedPaise = mine
       .filter((t) => t.direction === "received")
       .reduce((s, t) => s + t.amountPaise, 0);
-    // Gifts and your own share of a split are not debts.
-    const lendable = mine.filter((t) => !t.countsAsSpend && t.purpose !== "gift");
-    const lentOut = lendable
-      .filter((t) => t.direction === "sent")
-      .reduce((s, t) => s + t.amountPaise, 0);
-    const paidBack = lendable
-      .filter((t) => t.direction === "received")
-      .reduce((s, t) => s + t.amountPaise, 0);
+    const debt = derivePersonDebtBalance(mine);
     const dates = mine.map((t) => t.occurredAt).sort();
     return {
       person,
       sentPaise,
       receivedPaise,
-      netPaise: lentOut - paidBack,
-      lendingOutstandingPaise: Math.max(0, lentOut - paidBack),
+      netPaise: debt.netPaise,
+      lendingOutstandingPaise: debt.owedToYouPaise,
       lastActivity: dates.length ? dates[dates.length - 1] : null,
       transferCount: mine.length,
     };

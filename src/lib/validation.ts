@@ -115,6 +115,15 @@ export const transferSchema = z.object({
     .enum(["gift", "loan", "repayment", "split", "shared", "salary", "other"])
     .optional(),
   countsAsSpend: z.boolean().optional(),
+  balanceTreatment: z
+    .enum([
+      "creates_receivable",
+      "settles_receivable",
+      "creates_payable",
+      "settles_payable",
+      "none",
+    ])
+    .optional(),
   note: z.string().max(300).optional(),
 });
 

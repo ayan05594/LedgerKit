@@ -13,6 +13,10 @@ import type {
 import { recomputeForDate, recomputeInstrumentYear } from "@/lib/rewards/recompute";
 import { todayISO } from "@/lib/rewards/periods";
 import { requireUserId } from "@/lib/auth";
+import {
+  inferBalanceTreatment,
+  type BalanceTreatment,
+} from "@/lib/transfers/balance";
 import { ApiError } from "@/lib/api";
 import { deriveStandaloneReimbursementState } from "@/lib/reimbursements";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -1276,6 +1280,13 @@ export async function createTransfer(patch: Record<string, unknown>) {
       paymentAppSlug: (patch.paymentAppSlug as string) ?? null,
       purpose: (patch.purpose as "other") ?? "other",
       countsAsSpend: !!patch.countsAsSpend,
+      balanceTreatment:
+        (patch.balanceTreatment as BalanceTreatment | undefined) ??
+        inferBalanceTreatment({
+          direction: (patch.direction as "sent" | "received") ?? "sent",
+          purpose: String(patch.purpose ?? "other"),
+          countsAsSpend: !!patch.countsAsSpend,
+        }),
       settlesTransferId: (patch.settlesTransferId as string) ?? null,
       relatedExpenseId: (patch.relatedExpenseId as string) ?? null,
       note: String(patch.note ?? ""),
@@ -1349,7 +1360,7 @@ export async function updateTransfer(rowId: string, patch: Record<string, unknow
   for (const k of [
     "direction", "personId", "amountPaise", "occurredAt", "instrumentId",
     "accountId", "paymentAppSlug", "purpose", "countsAsSpend",
-    "settlesTransferId", "relatedExpenseId", "note",
+    "balanceTreatment", "settlesTransferId", "relatedExpenseId", "note",
   ])
     if (patch[k] !== undefined) values[k] = patch[k];
   if (!Object.keys(values).length) return false;

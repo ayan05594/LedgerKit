@@ -554,6 +554,14 @@ export function useCreateTransfer() {
   );
 }
 
+export function useUpdateTransfer() {
+  return useWrite(
+    ({ id, ...json }: { id: string } & Record<string, unknown>) =>
+      request(`/api/transfers/${id}`, { method: "PATCH", json }),
+    "Transfer updated",
+  );
+}
+
 export function useDeleteTransfer() {
   return useWrite(
     (id: string) => request(`/api/transfers/${id}`, { method: "DELETE" }),

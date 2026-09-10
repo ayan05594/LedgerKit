@@ -584,6 +584,18 @@ export const transfers = pgTable(
     countsAsSpend: boolean("counts_as_spend")
       .notNull()
       .default(false),
+    /** How this cash movement changes the running debt with the person. */
+    balanceTreatment: text("balance_treatment", {
+      enum: [
+        "creates_receivable",
+        "settles_receivable",
+        "creates_payable",
+        "settles_payable",
+        "none",
+      ],
+    })
+      .notNull()
+      .default("none"),
     settlesTransferId: text("settles_transfer_id"),
     relatedExpenseId: text("related_expense_id"),
     note: text("note").notNull().default(""),
