@@ -6,6 +6,7 @@ import {
   Plus,
   ShieldCheck,
   Trash2,
+  UserRound,
 } from "lucide-react";
 import {
   useCardSelection,
@@ -15,6 +16,7 @@ import {
   useCreatePaymentApp,
   useReference,
   useSaveCardSelection,
+  useSessionProfile,
 } from "@/lib/client-api";
 import { CardSelectionPicker } from "@/components/cards/card-selection";
 import { CategoryIcon } from "@/components/expenses/category-picker";
@@ -51,6 +53,7 @@ export default function SettingsPage() {
   const createCategory = useCreateCategory();
   const createMerchant = useCreateMerchant();
   const createApp = useCreatePaymentApp();
+  const { data: profile } = useSessionProfile();
   const [confirmClear, setConfirmClear] = React.useState(false);
   const [categoryOpen, setCategoryOpen] = React.useState(false);
   const [merchantOpen, setMerchantOpen] = React.useState(false);
@@ -93,6 +96,29 @@ export default function SettingsPage() {
           you want a clean slate.
         </p>
       </header>
+
+      <div id="profile" className="scroll-mt-5">
+        <Panel
+          title="Profile"
+          subtitle="The account currently signed in to LedgerKit"
+        >
+          <div className="flex items-center gap-3">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-sunken text-[0.9375rem] font-semibold text-ink-2">
+              {profile?.name?.charAt(0).toUpperCase() ?? (
+                <UserRound className="size-5" />
+              )}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-[0.9375rem] font-semibold">
+                {profile?.name ?? "Your profile"}
+              </p>
+              <p className="truncate text-[0.8125rem] text-ink-3">
+                {profile?.email ?? "Loading account…"}
+              </p>
+            </div>
+          </div>
+        </Panel>
+      </div>
 
       <div id="my-cards" className="scroll-mt-5">
         <Panel

@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import {
-  Building2,
   CheckCheck,
   Hourglass,
   Plus,
@@ -116,12 +115,13 @@ export default function PendingPage() {
         </div>
       ) : (
         <>
-          <StandaloneReimbursementsPanel
-            rows={data?.standaloneReimbursements ?? []}
-            onAdd={() => setClaimEditor({ open: true, row: null })}
-            onEdit={(row) => setClaimEditor({ open: true, row })}
-            onRecord={setReceivingClaim}
-          />
+          {(data?.standaloneReimbursements.length ?? 0) > 0 && (
+            <StandaloneReimbursementsPanel
+              rows={data?.standaloneReimbursements ?? []}
+              onEdit={(row) => setClaimEditor({ open: true, row })}
+              onRecord={setReceivingClaim}
+            />
+          )}
 
           <Panel
             title="Reimbursements"
@@ -273,12 +273,10 @@ const reimbursementKindLabels: Record<
 
 function StandaloneReimbursementsPanel({
   rows,
-  onAdd,
   onEdit,
   onRecord,
 }: {
   rows: StandaloneReimbursementRow[];
-  onAdd: () => void;
   onEdit: (row: StandaloneReimbursementRow) => void;
   onRecord: (row: StandaloneReimbursementRow) => void;
 }) {
@@ -288,20 +286,7 @@ function StandaloneReimbursementsPanel({
       subtitle="Allowances and claims that are not tied to an expense you logged"
       bodyClassName="p-0"
     >
-      {rows.length === 0 ? (
-        <EmptyState
-          icon={<Building2 className="size-5" />}
-          title="No separate reimbursements"
-          body="Add fuel, travel, phone or other money you expect from work or another organisation."
-          action={
-            <Button variant="secondary" onClick={onAdd}>
-              <Plus className="size-4" />
-              Add reimbursement
-            </Button>
-          }
-        />
-      ) : (
-        <ul className="divide-y divide-rule">
+      <ul className="divide-y divide-rule">
           {rows.map((row) => {
             const { reimbursement } = row;
             const overdue =
@@ -426,8 +411,7 @@ function StandaloneReimbursementsPanel({
               </li>
             );
           })}
-        </ul>
-      )}
+      </ul>
     </Panel>
   );
 }

@@ -10,15 +10,19 @@ import {
   LayoutDashboard,
   LogOut,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   ReceiptText,
   Settings,
+  UserRound,
   Users,
   Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button, Sheet } from "@/components/ui/primitives";
 import { ExpenseSheet } from "@/components/expenses/expense-sheet";
+import { useSessionProfile } from "@/lib/client-api";
 
 const NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
@@ -47,6 +51,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [moreOpen, setMoreOpen] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
   const [signingOut, setSigningOut] = React.useState(false);
+  const [railCollapsed, setRailCollapsed] = React.useState(false);
+  const { data: profile } = useSessionProfile(!isBarePage);
+
+  React.useEffect(() => {
+    setRailCollapsed(
+      window.localStorage.getItem("ledgerkit-rail-collapsed") === "true",
+    );
+  }, []);
 
   React.useEffect(() => setMoreOpen(false), [pathname]);
 
@@ -79,6 +91,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }
 
+  function toggleRail() {
+    setRailCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem("ledgerkit-rail-collapsed", String(next));
+      return next;
+    });
+  }
+
   if (isBarePage) {
     return <>{children}</>;
   }
@@ -109,10 +129,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* ------------------------------------------------ desktop left rail */}
-      <aside className="sticky top-0 hidden h-dvh w-[236px] shrink-0 flex-col border-r border-rule bg-surface px-3 py-4 lg:flex">
-        <Link href="/" className="mb-5 flex items-center gap-2.5 px-2">
+      <aside
+        className={cn(
+          "sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-rule bg-surface px-3 py-4 transition-[width] duration-200 lg:flex",
+          railCollapsed ? "w-[72px]" : "w-[236px]",
+        )}
+      >
+        <button
+          type="button"
+          onClick={toggleRail}
+          aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="absolute -right-3 top-5 z-10 flex size-6 items-center justify-center rounded-full border border-rule-strong bg-surface text-ink-3 shadow-sm transition-colors hover:text-ink"
+        >
+          {railCollapsed ? (
+            <PanelLeftOpen className="size-3.5" />
+          ) : (
+            <PanelLeftClose className="size-3.5" />
+          )}
+        </button>
+
+        <Link
+          href="/"
+          className={cn(
+            "mb-5 flex items-center gap-2.5",
+            railCollapsed ? "justify-center" : "px-2",
+          )}
+          title={railCollapsed ? "LedgerKit" : undefined}
+        >
           <Mark />
-          <div className="leading-tight">
+          <div className={cn("leading-tight", railCollapsed && "hidden")}>
             <div className="text-[0.9375rem] font-semibold tracking-[-0.02em]">
               LedgerKit
             </div>
@@ -124,36 +170,77 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <Button
           variant="primary"
-          className="mb-4 w-full justify-center"
+          className={cn("mb-4 w-full justify-center", railCollapsed && "px-0")}
           onClick={() => setAddOpen(true)}
+          title={railCollapsed ? "Add expense" : undefined}
+          aria-label={railCollapsed ? "Add expense" : undefined}
         >
           <Plus className="size-4" />
-          Add expense
-          <kbd className="ml-1 rounded border border-white/25 px-1 text-[0.625rem] font-medium text-white/60">
+          <span className={cn(railCollapsed && "hidden")}>Add expense</span>
+          <kbd
+            className={cn(
+              "ml-1 rounded border border-white/25 px-1 text-[0.625rem] font-medium text-white/60",
+              railCollapsed && "hidden",
+            )}
+          >
             N
           </kbd>
         </Button>
 
         <nav className="flex-1 space-y-0.5">
           {NAV.map((item) => (
-            <RailLink key={item.href} {...item} pathname={pathname} />
+            <RailLink
+              key={item.href}
+              {...item}
+              pathname={pathname}
+              collapsed={railCollapsed}
+            />
           ))}
         </nav>
+
+        <Link
+          href="/settings#profile"
+          className={cn(
+            "mb-1 flex items-center gap-2.5 rounded-[10px] px-2.5 py-2.5 transition-colors hover:bg-sunken/60",
+            railCollapsed && "justify-center px-0",
+          )}
+          title={
+            railCollapsed
+              ? `${profile?.name ?? "Profile"} — open profile`
+              : profile?.email
+          }
+        >
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sunken text-[0.75rem] font-semibold text-ink-2">
+            {profile?.name?.charAt(0).toUpperCase() ?? (
+              <UserRound className="size-4" />
+            )}
+          </span>
+          <span className={cn("min-w-0 flex-1", railCollapsed && "hidden")}>
+            <span className="block truncate text-[0.8125rem] font-semibold">
+              {profile?.name ?? "Your profile"}
+            </span>
+            <span className="block truncate text-[0.6875rem] text-ink-3">
+              Open profile
+            </span>
+          </span>
+        </Link>
 
         <button
           type="button"
           onClick={signOut}
           disabled={signingOut}
-          className="mb-3 flex items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[0.875rem] font-medium text-ink-2 transition-colors hover:bg-sunken/60 hover:text-ink"
+          className={cn(
+            "flex items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[0.875rem] font-medium text-ink-2 transition-colors hover:bg-sunken/60 hover:text-ink",
+            railCollapsed && "justify-center px-0",
+          )}
+          title={railCollapsed ? "Sign out" : undefined}
+          aria-label={railCollapsed ? "Sign out" : undefined}
         >
           <LogOut className="size-4 text-ink-3" />
-          {signingOut ? "Signing out…" : "Sign out"}
+          <span className={cn(railCollapsed && "hidden")}>
+            {signingOut ? "Signing out…" : "Sign out"}
+          </span>
         </button>
-
-        <p className="px-2 text-[0.6875rem] leading-relaxed text-ink-3">
-          Rates and caps are seeded from published card terms. Card issuers change
-          them often — check the numbers on each card page.
-        </p>
       </aside>
 
       <main className="min-w-0 flex-1">
@@ -216,10 +303,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
         </nav>
-        <p className="mt-4 text-[0.75rem] leading-relaxed text-ink-3">
-          Rates and caps are seeded from published card terms. Issuers change them
-          often — check the numbers on each card page.
-        </p>
+        <Link
+          href="/settings#profile"
+          className="mt-4 flex items-center gap-3 rounded-[10px] bg-sunken/70 px-3 py-3"
+          title={profile?.email}
+        >
+          <span className="flex size-9 items-center justify-center rounded-full bg-surface text-[0.8125rem] font-semibold">
+            {profile?.name?.charAt(0).toUpperCase() ?? (
+              <UserRound className="size-4" />
+            )}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[0.875rem] font-semibold">
+              {profile?.name ?? "Your profile"}
+            </span>
+            <span className="block truncate text-[0.75rem] text-ink-3">
+              Open profile
+            </span>
+          </span>
+        </Link>
         <button
           type="button"
           onClick={signOut}
@@ -241,11 +343,13 @@ function RailLink({
   label,
   icon: Icon,
   pathname,
+  collapsed,
 }: {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   pathname: string;
+  collapsed: boolean;
 }) {
   const active = isActive(href, pathname);
   return (
@@ -253,12 +357,14 @@ function RailLink({
       href={href}
       className={cn(
         "flex items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-[0.875rem] font-medium transition-colors",
+        collapsed && "justify-center px-0",
         active ? "bg-sunken text-ink" : "text-ink-2 hover:bg-sunken/60 hover:text-ink",
       )}
       aria-current={active ? "page" : undefined}
+      title={collapsed ? label : undefined}
     >
       <Icon className={cn("size-4", active ? "text-ink" : "text-ink-3")} />
-      {label}
+      <span className={cn(collapsed && "hidden")}>{label}</span>
     </Link>
   );
 }

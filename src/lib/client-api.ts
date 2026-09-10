@@ -134,6 +134,11 @@ export interface CardSelectionData {
   skippedCards: boolean;
 }
 
+export interface SessionProfile {
+  name: string;
+  email: string;
+}
+
 export type RewardPreview = RewardOutcome & {
   rewardUnit: string;
   unitValuePaise: number;
@@ -147,6 +152,7 @@ export type StandaloneReimbursementRow = ServerStandaloneReimbursementRow;
 /* ---------------------------------------------------------------- queries */
 
 export const keys = {
+  profile: ["session-profile"] as const,
   reference: ["reference"] as const,
   summary: (y: number, m: number) => ["summary", y, m] as const,
   expenses: (f: Record<string, unknown>) => ["expenses", f] as const,
@@ -157,6 +163,15 @@ export const keys = {
   pending: ["pending"] as const,
   cardSelection: ["card-selection"] as const,
 };
+
+export function useSessionProfile(enabled = true) {
+  return useQuery({
+    queryKey: keys.profile,
+    queryFn: () => request<SessionProfile>("/api/auth/profile"),
+    staleTime: Number.POSITIVE_INFINITY,
+    enabled,
+  });
+}
 
 export function useReference(enabled = true) {
   return useQuery({
