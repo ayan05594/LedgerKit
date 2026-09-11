@@ -11,6 +11,8 @@ const ownership = source("src/server/ownership.ts");
 const mutations = source("src/server/mutations.ts");
 const queries = source("src/server/queries.ts");
 const cardSelection = source("src/server/card-selection.ts");
+const cardBilling = source("src/server/card-billing.ts");
+const billingMigration = source("supabase/migrations/20260910223000_card_billing_cycles.sql");
 const seed = source("src/db/seed.ts");
 const demoRoute = source("src/app/api/demo/route.ts");
 const migration = source(
@@ -90,8 +92,19 @@ assert.match(
 
 assert.equal(
   (schema.match(/\.enableRLS\(\)/g) ?? []).length,
-  16,
+  17,
   "every application table must keep RLS enabled in Drizzle metadata",
+);
+
+assert.match(
+  cardBilling,
+  /from\("card_payments"\)[\s\S]*?\.eq\("user_id", userId\)/,
+  "card-payment reads must be tenant-scoped",
+);
+assert.match(
+  billingMigration,
+  /ALTER TABLE public\.card_payments ENABLE ROW LEVEL SECURITY/,
+  "card payments must enable RLS",
 );
 
 assert.match(

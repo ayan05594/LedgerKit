@@ -9,6 +9,7 @@ import {
 import { toast } from "sonner";
 import type {
   Account,
+  CardPayment,
   Category,
   Instrument,
   Merchant,
@@ -16,7 +17,9 @@ import type {
   Person,
   RewardRule,
   Transfer,
+  UserCardSelection,
 } from "@/db/schema";
+import type { CardCycleSummary } from "@/lib/cards/billing";
 import type {
   CardSummary,
   ExpenseRow,
@@ -114,6 +117,7 @@ export interface AccountBalance {
   refundedPaise: number;
   sentPaise: number;
   receivedPaise: number;
+  cardPaymentsPaise: number;
 }
 
 export interface ReferenceData {
@@ -149,6 +153,13 @@ export type TransferRow = Transfer & { personName: string; personColor: string }
 
 export type StandaloneReimbursementRow = ServerStandaloneReimbursementRow;
 
+export interface CardBillingRow {
+  instrument: Instrument;
+  selection: UserCardSelection;
+  summary: CardCycleSummary;
+  payments: CardPayment[];
+}
+
 /* ---------------------------------------------------------------- queries */
 
 export const keys = {
@@ -162,6 +173,7 @@ export const keys = {
   transfers: ["transfers"] as const,
   pending: ["pending"] as const,
   cardSelection: ["card-selection"] as const,
+  cardBilling: ["card-billing"] as const,
 };
 
 export function useSessionProfile(enabled = true) {
@@ -248,6 +260,14 @@ export function useCardSelection(enabled = true) {
     queryKey: keys.cardSelection,
     queryFn: () => request<CardSelectionData>("/api/card-selection"),
     staleTime: 60_000,
+    enabled,
+  });
+}
+
+export function useCardBilling(enabled = true) {
+  return useQuery({
+    queryKey: keys.cardBilling,
+    queryFn: () => request<CardBillingRow[]>("/api/card-billing"),
     enabled,
   });
 }
@@ -475,6 +495,37 @@ export function useDeleteInstrument() {
   return useWrite(
     (id: string) => request(`/api/instruments/${id}`, { method: "DELETE" }),
     "Card removed",
+  );
+}
+
+export function useUpdateCardBilling() {
+  return useWrite(
+    ({ id, ...json }: { id: string } & Record<string, unknown>) =>
+      request(`/api/card-billing/${id}`, { method: "PATCH", json }),
+    "Billing cycle saved",
+  );
+}
+
+export function useCreateCardPayment() {
+  return useWrite(
+    ({ instrumentId, ...json }: { instrumentId: string } & Record<string, unknown>) =>
+      request(`/api/card-billing/${instrumentId}/payments`, { method: "POST", json }),
+    "Card payment recorded",
+  );
+}
+
+export function useUpdateCardPayment() {
+  return useWrite(
+    ({ id, ...json }: { id: string } & Record<string, unknown>) =>
+      request(`/api/card-payments/${id}`, { method: "PATCH", json }),
+    "Card payment updated",
+  );
+}
+
+export function useDeleteCardPayment() {
+  return useWrite(
+    (id: string) => request(`/api/card-payments/${id}`, { method: "DELETE" }),
+    "Card payment removed",
   );
 }
 

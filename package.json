@@ -16,7 +16,7 @@
     "db:catalog:print": "node --import tsx scripts/generate-card-catalog-sql.mjs",
     "db:research:import": "python scripts/import-card-research.py data/research/LedgerKit_credit_card_catalogue_rewards_second_pass.xlsx src/data/credit-card-research.json",
     "typecheck": "tsc --noEmit --allowImportingTsExtensions",
-    "test": "tsx tests/engine.test.ts && tsx tests/validation.test.ts && tsx tests/reimbursements.test.ts && tsx tests/transfer-balances.test.ts && tsx tests/credit-card-catalog.test.ts && tsx tests/tenant-isolation.test.ts && tsx tests/data-api-mutations.test.ts && tsx tests/manual-rewards-ui.test.ts && tsx tests/manual-card-fallback.test.ts && tsx tests/card-wallet.test.ts"
+    "test": "tsx tests/engine.test.ts && tsx tests/validation.test.ts && tsx tests/reimbursements.test.ts && tsx tests/transfer-balances.test.ts && tsx tests/card-billing.test.ts && tsx tests/credit-card-catalog.test.ts && tsx tests/tenant-isolation.test.ts && tsx tests/data-api-mutations.test.ts && tsx tests/manual-rewards-ui.test.ts && tsx tests/manual-card-fallback.test.ts && tsx tests/card-wallet.test.ts"
   },
   "keywords": [],
   "author": "",

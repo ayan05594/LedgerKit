@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import type {
   Account,
   Adjustment,
+  CardPayment,
   Expense,
   Refund,
   RewardRule,
@@ -1145,7 +1146,7 @@ export async function deleteAccount(rowId: string) {
 export async function computeAccountBalances(authenticatedUserId?: string) {
   const userId = authenticatedUserId ?? await requireUserId();
   const admin = createSupabaseAdminClient();
-  const [accountResult, expenseResult, refundResult, transferResult] =
+  const [accountResult, expenseResult, refundResult, transferResult, cardPaymentResult] =
     await Promise.all([
       admin.from("accounts").select("*").eq("user_id", userId),
       admin
@@ -1164,8 +1165,13 @@ export async function computeAccountBalances(authenticatedUserId?: string) {
         .select("account_id,amount_paise,occurred_at,direction")
         .eq("user_id", userId)
         .not("account_id", "is", null),
+      admin
+        .from("card_payments")
+        .select("account_id,amount_paise,paid_at")
+        .eq("user_id", userId)
+        .not("account_id", "is", null),
     ]);
-  const error = [accountResult, expenseResult, refundResult, transferResult]
+  const error = [accountResult, expenseResult, refundResult, transferResult, cardPaymentResult]
     .find((result) => result.error)?.error;
   if (error) throw error;
   const all = fromSupabaseRows<Account>(accountResult.data);
@@ -1173,6 +1179,7 @@ export async function computeAccountBalances(authenticatedUserId?: string) {
   const expenseRows = fromSupabaseRows<Pick<Expense, "accountId" | "amountPaise" | "occurredAt">>(expenseResult.data);
   const refundRows = fromSupabaseRows<Pick<Refund, "toAccountId" | "amountPaise" | "refundedAt">>(refundResult.data);
   const transferRows = fromSupabaseRows<Pick<Transfer, "accountId" | "amountPaise" | "occurredAt" | "direction">>(transferResult.data);
+  const cardPaymentRows = fromSupabaseRows<Pick<CardPayment, "accountId" | "amountPaise" | "paidAt">>(cardPaymentResult.data);
 
   return all.map((account) => {
     const spent = expenseRows
@@ -1187,9 +1194,12 @@ export async function computeAccountBalances(authenticatedUserId?: string) {
     const received = transferRows
       .filter((row) => row.accountId === account.id && row.direction === "received" && row.occurredAt >= account.openingDate)
       .reduce((sum, row) => sum + row.amountPaise, 0);
+    const cardPayments = cardPaymentRows
+      .filter((row) => row.accountId === account.id && row.paidAt >= account.openingDate)
+      .reduce((sum, row) => sum + row.amountPaise, 0);
 
     const balancePaise =
-      account.openingBalancePaise - spent + refunded - sent + received;
+      account.openingBalancePaise - spent + refunded - sent + received - cardPayments;
     return {
       account,
       balancePaise,
@@ -1197,6 +1207,7 @@ export async function computeAccountBalances(authenticatedUserId?: string) {
       refundedPaise: refunded,
       sentPaise: sent,
       receivedPaise: received,
+      cardPaymentsPaise: cardPayments,
     };
   });
 }
@@ -1516,7 +1527,7 @@ export async function getSetting(key: string): Promise<string | null> {
 export async function clearTransactions() {
   const userId = await requireUserId();
   const admin = createSupabaseAdminClient();
-  for (const table of ["adjustments", "refunds", "expenses", "transfers"] as const) {
+  for (const table of ["adjustments", "refunds", "expenses", "transfers", "card_payments"] as const) {
     const result = await admin.from(table).delete().eq("user_id", userId);
     if (result.error) throw result.error;
   }

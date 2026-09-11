@@ -14,6 +14,7 @@ import { useReference, useSummary } from "@/lib/client-api";
 import { formatMoney, formatMoneyShort, percentFromBps } from "@/lib/money";
 import { rewardAutomationEnabled } from "@/lib/rewards/coverage";
 import { Button, Chip, EmptyState, Panel, Spinner } from "@/components/ui/primitives";
+import { CardBillingDashboard } from "@/components/cards/card-billing";
 
 export default function CardsPage() {
   const now = new Date();
@@ -57,6 +58,8 @@ export default function CardsPage() {
           Manage cards
         </Link>
       </header>
+
+      <CardBillingDashboard compact />
 
       {error || referenceError ? (
         <Panel>

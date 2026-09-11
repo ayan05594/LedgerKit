@@ -171,12 +171,57 @@ export const userCardSelections = pgTable(
     instrumentId: text("instrument_id")
       .notNull()
       .references(() => instruments.id, { onDelete: "restrict" }),
+    /** Per-user billing preferences. Catalogue defaults must never be mutated. */
+    statementDay: integer("statement_day"),
+    dueOffsetDays: integer("due_offset_days").notNull().default(20),
+    repaymentAccountId: text("repayment_account_id").references(
+      () => accounts.id,
+      { onDelete: "set null" },
+    ),
+    openingOutstandingPaise: integer("opening_outstanding_paise")
+      .notNull()
+      .default(0),
+    openingDate: text("opening_date"),
+    autopayMode: text("autopay_mode", {
+      enum: ["none", "full", "minimum", "fixed"],
+    })
+      .notNull()
+      .default("none"),
+    autopayAmountPaise: integer("autopay_amount_paise").notNull().default(0),
+    billingConfiguredAt: text("billing_configured_at"),
     createdAt: text("created_at").notNull().default(now),
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.instrumentId] }),
     index("user_card_selection_user_idx").on(t.userId),
     index("user_card_selection_instrument_idx").on(t.instrumentId),
+  ],
+).enableRLS();
+
+/* --------------------------------------------------------- card repayments */
+
+export const cardPayments = pgTable(
+  "card_payments",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    instrumentId: text("instrument_id")
+      .notNull()
+      .references(() => instruments.id, { onDelete: "restrict" }),
+    accountId: text("account_id").references(() => accounts.id, {
+      onDelete: "set null",
+    }),
+    amountPaise: integer("amount_paise").notNull(),
+    paidAt: text("paid_at").notNull(),
+    note: text("note").notNull().default(""),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (t) => [
+    index("card_payment_user_date_idx").on(t.userId, t.paidAt),
+    index("card_payment_instrument_date_idx").on(t.instrumentId, t.paidAt),
+    index("card_payment_account_idx").on(t.accountId),
+    check("card_payment_amount_positive", sql`${t.amountPaise} > 0`),
   ],
 ).enableRLS();
 
@@ -618,6 +663,7 @@ export const settings = pgTable("settings", {
 export type Account = typeof accounts.$inferSelect;
 export type Instrument = typeof instruments.$inferSelect;
 export type UserCardSelection = typeof userCardSelections.$inferSelect;
+export type CardPayment = typeof cardPayments.$inferSelect;
 export type UserOnboarding = typeof userOnboarding.$inferSelect;
 export type RewardRule = typeof rewardRules.$inferSelect;
 export type Category = typeof categories.$inferSelect;

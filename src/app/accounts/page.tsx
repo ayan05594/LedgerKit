@@ -50,7 +50,7 @@ export default function AccountsPage() {
           </h1>
           <p className="hint mt-0.5">
             Set an opening balance and LedgerKit keeps the running figure from
-            everything you log against it.
+            spending, transfers and card repayments you log against it.
           </p>
         </div>
         <Button
@@ -154,6 +154,7 @@ export default function AccountsPage() {
                 <Row label="Refunds in" value={`+${formatMoney(row.refundedPaise)}`} />
                 <Row label="Sent to people" value={`−${formatMoney(row.sentPaise)}`} />
                 <Row label="Received" value={`+${formatMoney(row.receivedPaise)}`} />
+                <Row label="Card payments" value={`−${formatMoney(row.cardPaymentsPaise)}`} />
                 <Row label="Since" value={formatDate(row.account.openingDate)} />
               </dl>
 

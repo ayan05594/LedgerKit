@@ -30,6 +30,7 @@ import { formatMoney, formatMoneyShort, percentFromBps, toPaise } from "@/lib/mo
 import { monthName } from "@/lib/rewards/periods";
 import { rewardAutomationEnabled } from "@/lib/rewards/coverage";
 import { CapMeter } from "@/components/dashboard/card-tile";
+import { CardBillingDashboard } from "@/components/cards/card-billing";
 import {
   Button,
   Chip,
@@ -156,6 +157,8 @@ export default function CardDetailPage() {
           </div>
         </div>
       </div>
+
+      <CardBillingDashboard instrumentId={id} />
 
       {sourceNote && (
         <div className="flex gap-2.5 rounded-[11px] border border-accent/20 bg-accent-soft p-3">
